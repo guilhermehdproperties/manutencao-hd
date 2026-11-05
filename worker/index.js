@@ -42,7 +42,7 @@ const PUBLIC = {
   async 'POST /api/invite/info'({ req, db }) {
     if (await tooMany(db, `invite:${ip(req)}`, 30)) return tooManyMsg();
     const inv = await findInvite(db, (await body(req)).token);
-    if (!inv) return json({ error: 'Este link já não é válido. Peça um link novo ao administrador.' }, 404);
+    if (!inv) return json({ error: 'Este link já não é válido. Peça um link novo a quem gere as contas.' }, 404);
     return json({ name: inv.name, username: inv.username, reset: Boolean(inv.pass) });
   },
 
@@ -50,7 +50,7 @@ const PUBLIC = {
     if (await tooMany(db, `invite:${ip(req)}`, 30)) return tooManyMsg();
     const b = await body(req);
     const inv = await findInvite(db, b.token);
-    if (!inv) return json({ error: 'Este link já não é válido. Peça um link novo ao administrador.' }, 404);
+    if (!inv) return json({ error: 'Este link já não é válido. Peça um link novo a quem gere as contas.' }, 404);
     if (!KEY_RE.test(b.key || '')) throw bad('Pedido inválido.');
     await db.batch([
       db.stmt(`UPDATE users SET pass = ?, session_version = session_version + 1, last_login = datetime('now') WHERE id = ?`, [await hashKey(b.key), inv.id]),

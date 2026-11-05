@@ -31,7 +31,7 @@ api.put('/api/me/password', async ({ db, req, user, secret, secure }) => {
   return json({ ok: true }, 200, { 'Set-Cookie': await sessionCookie(secret, fresh, secure) });
 });
 
-/* ---------- pessoas (só o administrador) ---------- */
+/* ---------- pessoas (só administração) ---------- */
 
 const inviteUrl = (url, token) => `${url.origin}/convite#${token}`;
 
@@ -90,7 +90,7 @@ api.put('/api/users/:id', async ({ db, req, user, params }) => {
   };
   if (u.role === 'admin' && (row.role !== 'admin' || !row.active)) {
     const others = await db.first(`SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?`, u.id);
-    if (!others.n) throw bad('Tem de existir pelo menos um administrador ativo.');
+    if (!others.n) throw bad('Tem de existir pelo menos uma conta de administração ativa.');
   }
   const stmts = [db.updateStmt('users', u.id, row)];
   // Desativar termina as sessões, apaga os convites e deixa de enviar notificações para essa pessoa.
@@ -129,6 +129,16 @@ async function houseOr404(db, hid) {
   if (!h) throw notFound('Casa não encontrada.');
   return h;
 }
+
+// Lista com o número de tarefas por fazer (as que a pessoa pode ver) e de orçamentos de cada casa.
+api.get('/api/houses', async ({ db, user }) => {
+  const own = isAdmin(user) ? '' : ' AND t.assignee_id = ?';
+  const rows = await db.all(`SELECT h.*,
+      (SELECT COUNT(*) FROM tasks t WHERE t.house_id = h.id AND t.status = 'aberta'${own}) AS open_tasks,
+      (SELECT COUNT(*) FROM quotes q WHERE q.house_id = h.id) AS quotes
+    FROM houses h ORDER BY h.active DESC, h.name COLLATE NOCASE`, ...(isAdmin(user) ? [] : [user.id]));
+  return json({ houses: rows });
+});
 
 api.get('/api/houses/:id', async ({ db, user, params }) => {
   const h = await houseOr404(db, id(params.id));

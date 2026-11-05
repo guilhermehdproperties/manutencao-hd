@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Escolher palavra-passe · Manutenção HD Properties</title>
+<meta name="theme-color" content="#ffffff">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/login.css">
+</head>
+<body>
+<main class="box">
+  <img src="/logo.webp" alt="HD Properties" class="logo">
+  <span class="pill">Gestão de manutenção</span>
+  <h1 id="title">Escolher palavra-passe</h1>
+  <p class="sub" id="sub">A verificar o link…</p>
+  <form id="f" novalidate hidden>
+    <p class="who" id="who"></p>
+    <input type="text" id="user" autocomplete="username" hidden>
+    <label for="pw">Palavra-passe</label>
+    <input id="pw" type="password" autocomplete="new-password" minlength="8" required>
+    <p class="hint">Pelo menos 8 caracteres.</p>
+    <label for="pw2">Repetir a palavra-passe</label>
+    <input id="pw2" type="password" autocomplete="new-password" required>
+    <p class="err" id="err" role="alert" hidden></p>
+    <button type="submit" id="go">Guardar e entrar</button>
+  </form>
+  <p class="err" id="bad" role="alert" hidden></p>
+</main>
+<script type="module" src="/convite.js"></script>
+</body>
+</html>

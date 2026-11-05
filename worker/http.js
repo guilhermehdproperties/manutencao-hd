@@ -5,7 +5,7 @@ export class HttpError extends Error {
 }
 export const bad = msg => new HttpError(400, msg);
 export const notFound = msg => new HttpError(404, msg);
-export const forbidden = (msg = 'Só o administrador pode fazer isto.') => new HttpError(403, msg);
+export const forbidden = (msg = 'Só uma conta de administração pode fazer isto.') => new HttpError(403, msg);
 
 const SECURITY = {
   'X-Content-Type-Options': 'nosniff',

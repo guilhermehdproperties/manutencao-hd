@@ -26,7 +26,7 @@ async function quoteOr404(db, qid) {
   return q;
 }
 
-// Quem registou o orçamento pode alterá-lo; o administrador pode alterar todos.
+// Quem registou o orçamento pode alterá-lo; a administração pode alterar todos.
 const canEdit = (user, q) => isAdmin(user) || q.created_by === user.id;
 
 async function quoteInput(db, b) {
@@ -53,14 +53,14 @@ export function registerQuotes(api) {
 
   api.put('/api/quotes/:id', async ({ db, req, user, params }) => {
     const q = await quoteOr404(db, id(params.id));
-    if (!canEdit(user, q)) throw forbidden('Só quem registou o orçamento, ou o administrador, o pode alterar.');
+    if (!canEdit(user, q)) throw forbidden('Só quem registou o orçamento, ou uma conta de administração, o pode alterar.');
     await db.update('quotes', q.id, { ...await quoteInput(db, await body(req)), updated_at: new Date().toISOString() });
     return json({ ok: true });
   });
 
   api.delete('/api/quotes/:id', async ({ db, env, user, params }) => {
     const q = await quoteOr404(db, id(params.id));
-    if (!canEdit(user, q)) throw forbidden('Só quem registou o orçamento, ou o administrador, o pode apagar.');
+    if (!canEdit(user, q)) throw forbidden('Só quem registou o orçamento, ou uma conta de administração, o pode apagar.');
     const stored = await db.all('SELECT stored FROM files WHERE quote_id = ?', q.id);
     await db.batch([db.stmt('DELETE FROM files WHERE quote_id = ?', [q.id]), db.stmt('DELETE FROM quotes WHERE id = ?', [q.id])]);
     await Promise.all(stored.map(f => env.FILES.delete(f.stored)));
@@ -70,7 +70,7 @@ export function registerQuotes(api) {
   // Um ficheiro por pedido, enviado tal como está (sem formulário), para gastar pouco processamento.
   api.post('/api/quotes/:id/files', async ({ db, env, req, url, user, params }) => {
     const q = await quoteOr404(db, id(params.id));
-    if (!canEdit(user, q)) throw forbidden('Só quem registou o orçamento, ou o administrador, pode juntar documentos.');
+    if (!canEdit(user, q)) throw forbidden('Só quem registou o orçamento, ou uma conta de administração, pode juntar documentos.');
     const mime = (req.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
     if (!ALLOWED.test(mime)) throw bad('Escolha uma fotografia, um PDF ou um documento do Office.');
     if (Number(req.headers.get('Content-Length') || 0) > MAX_FILE) throw bad('O ficheiro tem mais de 20 MB.');
@@ -87,7 +87,7 @@ export function registerQuotes(api) {
   api.delete('/api/files/:id', async ({ db, env, user, params }) => {
     const f = await db.first('SELECT f.*, q.created_by AS quote_by FROM files f JOIN quotes q ON q.id = f.quote_id WHERE f.id = ?', id(params.id));
     if (!f) throw notFound('Ficheiro não encontrado.');
-    if (!isAdmin(user) && f.created_by !== user.id && f.quote_by !== user.id) throw forbidden('Só quem juntou o ficheiro, ou o administrador, o pode apagar.');
+    if (!isAdmin(user) && f.created_by !== user.id && f.quote_by !== user.id) throw forbidden('Só quem juntou o ficheiro, ou uma conta de administração, o pode apagar.');
     await db.run('DELETE FROM files WHERE id = ?', f.id);
     await env.FILES.delete(f.stored);
     return json({ ok: true });

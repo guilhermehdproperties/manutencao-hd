@@ -12,7 +12,7 @@ const TASK_SELECT = `SELECT t.*, h.name AS house_name, a.name AS assignee_name, 
 
 const ORDER = 'ORDER BY t.due_date, t.due_time IS NULL, t.due_time, t.id';
 
-// O administrador vê todas as tarefas (ou as de uma pessoa); a equipa só vê as suas.
+// A administração vê todas as tarefas (ou as de uma pessoa); a equipa só vê as suas.
 export function visibleTasksSql(user, where = [], args = [], personId = null) {
   where = [...where]; args = [...args];
   if (!isAdmin(user)) { where.push('t.assignee_id = ?'); args.push(user.id); }
@@ -26,7 +26,7 @@ async function visibleTask(db, user, tid) {
   return t;
 }
 
-// A equipa só altera as tarefas que criou para si; as atribuídas pelo administrador só as pode concluir.
+// A equipa só altera as tarefas que criou para si; as atribuídas pela administração só as pode concluir.
 const canEdit = (user, t) => isAdmin(user) || (t.created_by === user.id && t.assignee_id === user.id);
 
 async function taskInput(db, b, user) {
@@ -70,7 +70,7 @@ export function registerTasks(api) {
 
   api.put('/api/tasks/:id', async ({ db, env, ctx, req, user, params }) => {
     const t = await visibleTask(db, user, id(params.id));
-    if (!canEdit(user, t)) throw forbidden('Só o administrador pode alterar esta tarefa.');
+    if (!canEdit(user, t)) throw forbidden('Esta tarefa só pode ser alterada por uma conta de administração.');
     const row = await taskInput(db, await body(req), user);
     await db.update('tasks', t.id, { ...row, updated_at: new Date().toISOString() });
     if (row.assignee_id !== t.assignee_id) later(ctx, noticeAssigned(db, env, t.id, user));
@@ -94,7 +94,7 @@ export function registerTasks(api) {
 
   api.delete('/api/tasks/:id', async ({ db, user, params }) => {
     const t = await visibleTask(db, user, id(params.id));
-    if (!canEdit(user, t)) throw forbidden('Só o administrador pode apagar esta tarefa.');
+    if (!canEdit(user, t)) throw forbidden('Esta tarefa só pode ser apagada por uma conta de administração.');
     await db.run('DELETE FROM tasks WHERE id = ?', t.id);
     return json({ ok: true });
   });

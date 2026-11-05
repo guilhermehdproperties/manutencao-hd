@@ -1,7 +1,7 @@
 // Tipos de conta e cores das pessoas (sem vermelho nem verde, que são as cores do estado das tarefas).
 import { forbidden } from './http.js';
 
-export const ROLES = { admin: 'Administrador', equipa: 'Equipa' };
+export const ROLES = { admin: 'Administração', equipa: 'Equipa' };
 export const COLORS = ['azul', 'laranja', 'roxo', 'turquesa', 'rosa', 'castanho', 'amarelo', 'cinzento'];
 
 export const isAdmin = u => u.role === 'admin';
