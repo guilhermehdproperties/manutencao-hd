@@ -1,0 +1,19 @@
+{
+  "name": "manutencao-hd",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tarefas de manutenção e orçamentos das casas da HD Properties, com notificações no telemóvel.",
+  "type": "module",
+  "main": "worker/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.150.0"
+  }
+}

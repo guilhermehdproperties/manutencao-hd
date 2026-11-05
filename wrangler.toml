@@ -1,0 +1,24 @@
+name = "manutencao-hd"
+main = "worker/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "manutencao-hd"
+database_id = "14f937af-0728-4dc1-b534-b4930e853525"
+
+[[kv_namespaces]]
+binding = "FILES"
+id = "7582028133504cf9839fa2e45244143c"
+
+# Avisos das tarefas do dia: a verificação corre de hora a hora e só envia a partir das 8h (Lisboa).
+[triggers]
+crons = ["10 * * * *"]
+
+[observability]
+enabled = true

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Entrar · Manutenção HD Properties</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/login.css">
+</head>
+<body>
+<main class="box">
+  <img src="/logo.webp" alt="HD Properties" class="logo">
+  <span class="pill">Gestão de manutenção</span>
+  <h1>Entrar</h1>
+  <p class="sub">Use o seu nome de utilizador e a sua palavra-passe.</p>
+  <form id="f" novalidate>
+    <label for="user">Nome de utilizador</label>
+    <input id="user" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus>
+    <label for="pw">Palavra-passe</label>
+    <input id="pw" name="password" type="password" autocomplete="current-password" required>
+    <p class="err" id="err" role="alert" hidden></p>
+    <button type="submit" id="go">Entrar</button>
+  </form>
+  <p class="foot">Esqueceu-se da palavra-passe? Peça ao administrador um link novo.</p>
+</main>
+<script type="module" src="/login.js"></script>
+</body>
+</html>
