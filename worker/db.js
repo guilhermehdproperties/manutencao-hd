@@ -1,5 +1,22 @@
 // Base de dados (D1): tabelas, acesso com funções curtas e definições guardadas.
 
+const TASKS_TABLE = `CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    notes TEXT,
+    house_id INTEGER REFERENCES houses(id),
+    assignee_id INTEGER REFERENCES users(id), -- vazio: tarefa para todos
+    due_date TEXT NOT NULL,
+    due_time TEXT,
+    status TEXT NOT NULL DEFAULT 'aberta',
+    done_at TEXT,
+    done_by INTEGER,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT
+  )`;
+const TASK_COLUMNS = 'id, title, notes, house_id, assignee_id, due_date, due_time, status, done_at, done_by, created_by, created_at, updated_at';
+
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -30,23 +47,20 @@ const SCHEMA = [
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
-  `CREATE TABLE IF NOT EXISTS tasks (
+  TASKS_TABLE,
+  `CREATE INDEX IF NOT EXISTS tasks_by_due ON tasks(due_date)`,
+  `CREATE INDEX IF NOT EXISTS tasks_by_assignee ON tasks(assignee_id, status)`,
+  // Histórico de cada tarefa: criada, data, pessoa, editada, feita, reaberta.
+  `CREATE TABLE IF NOT EXISTS task_events (
     id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    notes TEXT,
-    house_id INTEGER REFERENCES houses(id),
-    assignee_id INTEGER NOT NULL REFERENCES users(id),
-    due_date TEXT NOT NULL,
-    due_time TEXT,
-    status TEXT NOT NULL DEFAULT 'aberta',
-    done_at TEXT,
-    done_by INTEGER,
-    created_by INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id INTEGER,
+    kind TEXT NOT NULL,
+    from_value TEXT,
+    to_value TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
-  `CREATE INDEX IF NOT EXISTS tasks_due ON tasks(due_date)`,
-  `CREATE INDEX IF NOT EXISTS tasks_assignee ON tasks(assignee_id, status)`,
+  `CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id)`,
   `CREATE TABLE IF NOT EXISTS quotes (
     id INTEGER PRIMARY KEY,
     house_id INTEGER NOT NULL REFERENCES houses(id),
@@ -100,9 +114,21 @@ const SCHEMA = [
 
 let ready = null;
 
+// Bases criadas antes das tarefas para todos, em que a pessoa era obrigatória: passa-se a tabela para a forma nova,
+// copiando as tarefas. A tabela antiga fica guardada como tasks_v1 (nada é apagado).
+async function migrate(D) {
+  const cols = (await D.prepare('PRAGMA table_info(tasks)').all()).results;
+  if (!cols.some(c => c.name === 'assignee_id' && c.notnull)) return;
+  await D.batch([
+    D.prepare('ALTER TABLE tasks RENAME TO tasks_v1'),
+    D.prepare(TASKS_TABLE),
+    D.prepare(`INSERT INTO tasks (${TASK_COLUMNS}) SELECT ${TASK_COLUMNS} FROM tasks_v1`),
+  ]);
+}
+
 // Acesso à base de dados com funções curtas; cria as tabelas na primeira utilização.
 export async function openDb(env) {
-  ready ??= env.DB.batch(SCHEMA.map(s => env.DB.prepare(s))).catch(e => { ready = null; throw e; });
+  ready ??= migrate(env.DB).then(() => env.DB.batch(SCHEMA.map(s => env.DB.prepare(s)))).catch(e => { ready = null; throw e; });
   await ready;
   const D = env.DB;
   const stmt = (sql, args) => D.prepare(sql).bind(...args.map(a => a === undefined ? null : a));

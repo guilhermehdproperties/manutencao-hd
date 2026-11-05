@@ -11,8 +11,10 @@ Aplicação de tarefas de manutenção e orçamentos das casas da HD Properties,
 - Notificações: Web Push com VAPID e cifra aes128gcm (`worker/push.js`, testada com o exemplo do RFC 8291). Só se aceitam endereços de subscrição dos serviços conhecidos (Google, Apple, Mozilla, Microsoft); `PUSH_ANY_ENDPOINT=1` só em `.dev.vars` para testes locais.
 
 ## Regras do negócio
-- Tarefas: vermelho por fazer, verde feita (botão verde "Concluir"). A equipa só vê as suas; a administração vê todas e filtra por pessoa.
-- Avisos: tarefa atribuída (a quem a recebe), tarefas do dia às 8h de Lisboa (uma vez por tarefa e por dia), tarefa concluída (à administração).
+- Tarefas: vermelho por fazer, verde feita (botão verde "Concluir"). `assignee_id` vazio = **Todos** (toda a equipa ativa vê e qualquer pessoa conclui ou "fica com ela"). A equipa vê as suas e as de todos; a administração vê todas e filtra por pessoa ou "Para todos".
+- Quem vê uma tarefa aberta pode mudar a data, a hora e a pessoa (`POST /api/tasks/:id/move`); título, notas, casa e apagar só a administração ou quem a criou. Todas as mudanças ficam em `task_events` e aparecem no histórico da tarefa.
+- Avisos: tarefa nova ou passada (a quem a recebe; nas de todos, à equipa), data mudada (a quem a tem), tarefas do dia às 8h de Lisboa (uma vez por tarefa, pessoa e dia), tarefa concluída (à administração e, nas de todos, ao resto da equipa), relatório pronto no dia 1 (à administração). Das mudanças, nunca se avisa quem as fez nem a administração (exceto se a tarefa for dela).
+- Relatório mensal (`worker/report.js`): tarefas com data no mês; feita a tempo se concluída até ao dia marcado (Lisboa), não feita se a data passou sem estar concluída. As tarefas de uma pessoa contam para ela; as de todos para quem as fez (ou "Para todos (por concluir)"). Adiamentos = mudanças de data para um dia mais tarde, contadas para quem as fez.
 - As casas começam vazias; quem usa a aplicação acrescenta-as.
 - Orçamentos: casa, fornecedor, descrição, valor, data, estado (pendente, aceite, recusado) e documentos.
 

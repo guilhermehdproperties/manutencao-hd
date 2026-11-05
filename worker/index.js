@@ -3,7 +3,8 @@ import { json, body, bad, withSecurity, HttpError } from './http.js';
 import { openDb } from './db.js';
 import { api } from './api.js';
 import { currentUser, sessionCookie, clearCookie, sessionSecret, keyMatches, hashKey, KEY_RE, findInvite, tooMany, clearAttempts } from './auth.js';
-import { morningReminders } from './notify.js';
+import { morningReminders, monthlyReportNotice } from './notify.js';
+import { reportSummary } from './api-report.js';
 import { id } from './validate.js';
 
 const INLINE = /^(image\/(jpeg|png|webp|gif)|application\/pdf)$/;
@@ -99,12 +100,15 @@ export default {
     }
   },
 
-  // De hora a hora: a partir das 8h, avisa cada pessoa das tarefas do dia que ainda não estão feitas.
+  // De hora a hora: a partir das 8h, avisa cada pessoa das tarefas do dia que ainda não estão feitas;
+  // no dia 1 de cada mês, avisa a administração de que o relatório do mês anterior está pronto.
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const db = await openDb(env);
       const r = await morningReminders(db, env);
       if (r.sent) console.log('[avisos]', JSON.stringify(r));
+      const m = await monthlyReportNotice(db, env, month => reportSummary(db, month));
+      if (m.sent) console.log('[relatório]', JSON.stringify(m));
     })());
   },
 };

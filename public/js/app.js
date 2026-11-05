@@ -1,7 +1,7 @@
-// Arranque, navegação por endereço (#calendario, #tarefa-3, #casa-2…) e ações dos botões.
+// Arranque, navegação por endereço (#calendario, #tarefa-3, #casa-2, #relatorio-2026-10…) e ações dos botões.
 import { api, html, icon, toast, closeModal, modalOpen, submitModal } from './core.js';
 import { monthOf, addMonths, monthWeeks } from './dates.js';
-import { renderCalendar, renderTasks, renderQuotes, quoteResults, renderHouses, houseCards, renderHouse, renderPeople, renderAccount } from './views.js';
+import { renderCalendar, renderTasks, renderQuotes, quoteResults, renderHouses, houseCards, renderHouse, renderPeople, renderAccount, renderReport } from './views.js';
 import { openTaskForm, openTaskDetail, openQuoteForm, openHouseForm, openPersonForm, openInviteModal, openPasswordForm } from './forms.js';
 import { registerWorker, pushState, enablePush, disablePush, syncSubscription, promptInstall } from './push.js';
 
@@ -9,19 +9,21 @@ const view = document.getElementById('view');
 const state = {
   me: null, isAdmin: false, route: { name: 'calendario' },
   month: null, selected: null, person: null,
-  monthTasks: [], list: [], quotes: [], houses: [], house: null, people: [],
+  monthTasks: [], list: [], quotes: [], houses: [], house: null, people: [], report: null,
   quoteFilter: { q: '', house: '', status: '' }, houseQuery: '',
   push: null, flash: null, loadedAt: 0,
 };
 
 const PAGES = ['calendario', 'tarefas', 'orcamentos', 'casas', 'pessoas', 'conta', 'boas-vindas'];
-const TITLES = { calendario: 'Calendário', tarefas: 'Tarefas', orcamentos: 'Orçamentos', casas: 'Casas', pessoas: 'Pessoas', conta: 'Conta', 'boas-vindas': 'Conta' };
+const ADMIN_ONLY = ['pessoas', 'relatorio'];
+const TITLES = { calendario: 'Calendário', tarefas: 'Tarefas', orcamentos: 'Orçamentos', casas: 'Casas', pessoas: 'Pessoas', conta: 'Conta', 'boas-vindas': 'Conta', relatorio: 'Relatório' };
 
 function parseRoute() {
   const h = decodeURIComponent(location.hash.slice(1));
   let m;
   if ((m = h.match(/^tarefa-(\d+)$/))) return { name: 'calendario', task: Number(m[1]) };
   if ((m = h.match(/^casa-(\d+)$/))) return { name: 'casa', id: Number(m[1]) };
+  if ((m = h.match(/^relatorio(?:-(\d{4}-(?:0[1-9]|1[0-2])))?$/))) return { name: 'relatorio', id: m[1] || null };
   return { name: PAGES.includes(h) ? h : 'calendario' };
 }
 
@@ -47,24 +49,28 @@ async function load(route) {
   if (route.name === 'casas') state.houses = (await api('/houses')).houses;
   if (route.name === 'casa') state.house = await api(`/houses/${route.id}`);
   if (route.name === 'pessoas') state.people = (await api('/users')).users;
+  if (route.name === 'relatorio') state.report = await api(`/report?month=${route.id || monthOf(state.me.today)}`);
 }
 
 function draw() {
   const r = state.route;
   const out = {
     calendario: renderCalendar, tarefas: renderTasks, orcamentos: renderQuotes, casas: renderHouses, casa: renderHouse,
-    pessoas: renderPeople, conta: s => renderAccount(s), 'boas-vindas': s => renderAccount(s, true),
+    pessoas: renderPeople, conta: s => renderAccount(s), 'boas-vindas': s => renderAccount(s, true), relatorio: renderReport,
   }[r.name](state);
   view.innerHTML = String(out);
   const nav = r.name === 'casa' ? 'casas' : r.name === 'boas-vindas' ? 'conta' : r.name;
+  // No telemóvel, o relatório fica no separador Tarefas.
+  document.querySelectorAll('.tabbar [data-nav="tarefas"]').forEach(a => { if (nav === 'relatorio') a.setAttribute('aria-current', 'page'); });
   document.querySelectorAll('[data-nav]').forEach(a => a.setAttribute('aria-current', a.dataset.nav === nav ? 'page' : 'false'));
   const title = r.name === 'casa' && state.house ? state.house.house.name : TITLES[r.name];
+  document.body.classList.toggle('report-page', r.name === 'relatorio');
   document.title = `${title} · Manutenção HD Properties`;
 }
 
 async function show({ keepScroll = false } = {}) {
   const next = parseRoute();
-  if (next.name === 'pessoas' && !state.isAdmin) { location.hash = 'calendario'; return; }
+  if (ADMIN_ONLY.includes(next.name) && !state.isAdmin) { location.hash = 'calendario'; return; }
   const changed = next.name !== state.route.name || next.id !== state.route.id;
   state.route = next;
   if (changed) view.style.opacity = '.55';
@@ -148,7 +154,16 @@ const actions = {
     else { state.month = addMonths(state.month, step); state.selected = state.month === monthOf(today()) ? today() : `${state.month}-01`; }
     show({ keepScroll: true });
   },
-  person: el => { state.person = el.dataset.id ? Number(el.dataset.id) : null; show({ keepScroll: true }); },
+  person: el => { const v = el.dataset.id; state.person = v === 'todos' ? 'todos' : v ? Number(v) : null; show({ keepScroll: true }); },
+  'report-month': el => {
+    const step = Number(el.dataset.step);
+    const month = step ? addMonths(state.report.month, step) : monthOf(today());
+    location.hash = month === monthOf(today()) ? 'relatorio' : `relatorio-${month}`;
+  },
+  'report-print': () => window.print(),
+  'open-report-task': async el => {
+    try { openTaskDetail(state, (await api(`/tasks/${el.dataset.id}`)).task, after); } catch (err) { toast(err.message, true); }
+  },
   'new-quote': el => openQuoteForm(state, {
     house: el.dataset.house ? Number(el.dataset.house) : state.quoteFilter.house ? Number(state.quoteFilter.house) : null,
   }, after),

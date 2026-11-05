@@ -1,4 +1,4 @@
-// Janelas com formulários: tarefa, detalhe da tarefa, orçamento (com documentos), casa, pessoa, convite e palavra-passe.
+// Janelas com formulários: tarefa, mudar data ou pessoa, detalhe com histórico, orçamento (com documentos), casa, pessoa, convite e palavra-passe.
 import { html, icon, api, toast, openModal, closeModal, modalHead, field, readForm, showFormError, busy, confirmDialog, avatar, firstName, norm, parseNum } from './core.js';
 import { longDate } from './dates.js';
 import { passwordKey } from './kdf.js';
@@ -34,17 +34,35 @@ async function resolveHouse(d, s) {
 
 /* ---------- tarefas ---------- */
 
-export const canEditTask = (s, t) => s.isAdmin || (t.created_by === s.me.user.id && t.assignee_id === s.me.user.id);
+// Título, notas, casa e apagar: só a administração ou quem criou a tarefa. A data, a hora e a pessoa, todos os que a veem.
+export const canEditAll = (s, t) => s.isAdmin || t.created_by === s.me.user.id;
+const ALL = 'todos';
+const assigneeValue = t => t.assignee_id ?? ALL;
+const nameOf = (s, uid) => s.me.users.find(u => u.id === Number(uid))?.name || 'outra pessoa';
+
+function assigneeField(s, value, keepId = null) {
+  const people = s.me.users.filter(u => u.active || u.id === keepId);
+  const options = [['', '— Escolha —'], [ALL, 'Todos (qualquer pessoa da equipa)'], ...people.map(u => [u.id, u.id === s.me.user.id ? `${u.name} (eu)` : u.name])];
+  return field('Para quem', 'assignee_id', { value, full: true, options, hint: 'As tarefas para todos aparecem no calendário de toda a equipa.' });
+}
+
+const assigneeBody = v => v === ALL ? null : Number(v);
+
+function movedToast(s, before, assignee) {
+  if ((before.assignee_id ?? null) === assignee) return 'Tarefa mudada.';
+  if (assignee === null) return 'Tarefa passada a todos.';
+  if (assignee === s.me.user.id) return 'A tarefa passou a ser sua.';
+  return `Tarefa passada a ${firstName(nameOf(s, assignee))}.`;
+}
 
 export function openTaskForm(s, { task = null, date = null, house = null } = {}, after) {
-  const people = s.me.users.filter(u => u.active || u.id === task?.assignee_id);
-  const assignee = task?.assignee_id ?? s.person ?? '';
-  const m = openModal(html`${modalHead(task ? 'Editar tarefa' : 'Nova tarefa', task ? '' : s.isAdmin ? 'Aparece no calendário da pessoa, que recebe um aviso no telemóvel.' : 'Fica no seu calendário.')}
+  const initial = task ? assigneeValue(task) : s.isAdmin ? (s.person ?? '') : s.me.user.id;
+  const m = openModal(html`${modalHead(task ? 'Editar tarefa' : 'Nova tarefa', task ? '' : 'Aparece no calendário de quem a vai fazer, que recebe um aviso no telemóvel.')}
     <form class="modal-b" id="taskForm" novalidate>
       <div class="form-error" hidden></div>
       <div class="form-grid">
         ${field('O que é preciso fazer', 'title', { value: task?.title, full: true, attrs: 'required maxlength="160" autocomplete="off"', placeholder: 'Ex.: Trocar a lâmpada da cozinha' })}
-        ${s.isAdmin ? field('Para quem', 'assignee_id', { value: assignee, full: true, options: [['', '— Escolha a pessoa —'], ...people.map(u => [u.id, u.id === s.me.user.id ? `${u.name} (eu)` : u.name])] }) : ''}
+        ${assigneeField(s, initial, task?.assignee_id)}
         ${houseField(s.me.houses, task?.house_id ?? house, { optional: true })}
         ${field('Data', 'due_date', { type: 'date', value: task?.due_date || date || s.me.today, attrs: 'required' })}
         ${field('Hora (opcional)', 'due_time', { type: 'time', value: task?.due_time || '' })}
@@ -62,15 +80,14 @@ export function openTaskForm(s, { task = null, date = null, house = null } = {},
     try {
       const d = readForm(m.querySelector('#taskForm'));
       if (!d.title) throw new Error('Escreva o que é preciso fazer.');
-      if (s.isAdmin && !d.assignee_id) throw new Error('Escolha para quem é a tarefa.');
+      if (!d.assignee_id) throw new Error('Escolha para quem é a tarefa (ou "Todos").');
       if (!d.due_date) throw new Error('Escolha a data.');
       await busy(btn, async () => {
-        const body = { title: d.title, house_id: await resolveHouse(d, s), due_date: d.due_date, due_time: d.due_time || null, notes: d.notes };
-        if (s.isAdmin) body.assignee_id = Number(d.assignee_id);
+        const assignee = assigneeBody(d.assignee_id);
+        const body = { title: d.title, assignee_id: assignee, house_id: await resolveHouse(d, s), due_date: d.due_date, due_time: d.due_time || null, notes: d.notes };
         const r = task ? await api(`/tasks/${task.id}`, { method: 'PUT', body }) : await api('/tasks', { method: 'POST', body });
         closeModal();
-        const who = s.isAdmin && Number(d.assignee_id) !== s.me.user.id ? s.me.users.find(u => u.id === Number(d.assignee_id)) : null;
-        toast(task ? 'Tarefa guardada.' : who ? `Tarefa criada para ${firstName(who.name)}.` : 'Tarefa criada.');
+        toast(task ? 'Tarefa guardada.' : assignee === null ? 'Tarefa criada para todos.' : assignee !== s.me.user.id ? `Tarefa criada para ${firstName(nameOf(s, assignee))}.` : 'Tarefa criada.');
         after({ taskId: task?.id ?? r.id, date: d.due_date });
       });
     } catch (e) { showFormError(e.message); }
@@ -82,28 +99,114 @@ export function openTaskForm(s, { task = null, date = null, house = null } = {},
   });
 }
 
+// Mudar a data, a hora ou a pessoa (qualquer pessoa que veja a tarefa).
+export function openMoveForm(s, t, after) {
+  const m = openModal(html`${modalHead('Mudar data ou pessoa', t.title)}
+    <form class="modal-b" id="moveForm" novalidate>
+      <div class="form-error" hidden></div>
+      <div class="form-grid">
+        ${field('Data', 'due_date', { type: 'date', value: t.due_date, attrs: 'required' })}
+        ${field('Hora (opcional)', 'due_time', { type: 'time', value: t.due_time || '' })}
+        ${assigneeField(s, assigneeValue(t), t.assignee_id)}
+      </div>
+      <p class="big-note">Se passar a tarefa a outra pessoa, ela recebe um aviso no telemóvel. A mudança fica registada no histórico da tarefa.</p>
+    </form>
+    <div class="modal-f"><button class="btn btn-ghost" type="button" data-close>Cancelar</button>
+      <button class="btn btn-primary" type="button" id="moveSave">${icon('check', 'ico sm')}Guardar</button></div>`, { submit: () => save() });
+  const btn = m.querySelector('#moveSave');
+  async function save() {
+    try {
+      const d = readForm(m.querySelector('#moveForm'));
+      if (!d.due_date) throw new Error('Escolha a data.');
+      if (!d.assignee_id) throw new Error('Escolha para quem é a tarefa (ou "Todos").');
+      await busy(btn, async () => {
+        const assignee = assigneeBody(d.assignee_id);
+        await api(`/tasks/${t.id}/move`, { method: 'POST', body: { due_date: d.due_date, due_time: d.due_time || null, assignee_id: assignee } });
+        closeModal();
+        toast(movedToast(s, t, assignee));
+        after({ taskId: t.id, date: d.due_date });
+      });
+    } catch (e) { showFormError(e.message); }
+  }
+  btn.addEventListener('click', save);
+}
+
+// Ficar com uma tarefa para todos: passa a ser só de quem carrega no botão.
+export async function takeTask(s, t, after) {
+  await api(`/tasks/${t.id}/move`, { method: 'POST', body: { due_date: t.due_date, due_time: t.due_time, assignee_id: s.me.user.id } });
+  closeModal();
+  toast('A tarefa passou a ser sua.');
+  after({ taskId: t.id, date: t.due_date });
+}
+
+/* ---------- histórico da tarefa ---------- */
+
+const eventTime = iso => {
+  const d = new Date(iso.replace(' ', 'T') + 'Z');
+  return d.toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' }).replace(',', ' às');
+};
+const whenValue = v => v ? `${longDate(v.slice(0, 10))}${v.length > 10 ? ` às ${v.slice(11)}` : ''}` : '';
+
+function eventText(s, e) {
+  const who = firstName(e.user_name || 'Alguém');
+  switch (e.kind) {
+    case 'criada': return `Criada por ${who}`;
+    case 'data': return `${who} mudou para ${whenValue(e.to_value)} (era ${whenValue(e.from_value)})`;
+    case 'pessoa':
+      if (e.to_value === ALL) return `${who} passou a tarefa a todos`;
+      if (e.from_value === ALL && Number(e.to_value) === e.user_id) return `${who} ficou com a tarefa`;
+      return `${who} passou a tarefa a ${firstName(nameOf(s, e.to_value))}`;
+    case 'editada': return `${who} alterou a descrição`;
+    case 'feita': return `Feita por ${who}`;
+    case 'reaberta': return `Reaberta por ${who}`;
+    default: return e.kind;
+  }
+}
+
+async function fillHistory(s, t, box) {
+  try {
+    const { events } = await api(`/tasks/${t.id}`);
+    if (!box.isConnected) return;
+    box.innerHTML = String(events.length
+      ? html`<h4>Histórico</h4><ol class="history">${events.map(e => html`<li><span>${eventText(s, e)}</span><time>${eventTime(e.created_at)}</time></li>`)}</ol>`
+      : '');
+  } catch { box.innerHTML = ''; }
+}
+
 // Detalhe de uma tarefa (também é o que abre ao tocar numa notificação).
 export function openTaskDetail(s, t, after) {
   const done = t.status === 'feita';
   const late = !done && t.due_date < s.me.today;
+  const forAll = t.assignee_id == null;
   const m = openModal(html`${modalHead(t.title, done ? html`<span class="st done">${icon('check')}Feita</span>` : html`<span class="st open">${late ? 'Atrasada' : 'Por fazer'}</span>`)}
     <div class="modal-b detail">
       <dl class="kv">
-        <dt>Para quem</dt><dd><span class="who">${avatar({ name: t.assignee_name, color: t.assignee_color }, 'xs')}${t.assignee_name}</span></dd>
+        <dt>Para quem</dt><dd>${forAll ? html`<span class="who all">${icon('users', 'ico sm')}Todos (qualquer pessoa da equipa)</span>` : html`<span class="who">${avatar({ name: t.assignee_name, color: t.assignee_color }, 'xs')}${t.assignee_name}</span>`}</dd>
         <dt>Data</dt><dd>${longDate(t.due_date)}${t.due_time ? ` às ${t.due_time}` : ''}</dd>
         ${t.house_name ? html`<dt>Casa</dt><dd><a class="link" href="#casa-${t.house_id}">${t.house_name}</a></dd>` : ''}
         ${t.created_by_name && t.created_by !== t.assignee_id ? html`<dt>Criada por</dt><dd>${t.created_by_name}</dd>` : ''}
       </dl>
       ${t.notes ? html`<div class="d-notes">${t.notes}</div>` : ''}
       ${done ? html`<div class="done-box">${icon('check-circle')}<span>Feita${t.done_by_name ? ` por ${t.done_by_name}` : ''} ${doneWhen(t, s.me.today)}</span></div>` : ''}
+      ${!done ? html`<div class="detail-acts">
+        <button class="btn btn-ghost" type="button" id="tMove">${icon('calendar', 'ico sm')}Mudar data ou pessoa</button>
+        ${forAll ? html`<button class="btn btn-ghost" type="button" id="tTake">${icon('user', 'ico sm')}Fico com esta</button>` : ''}
+      </div>` : ''}
+      <div class="history-box" id="tHistory"></div>
     </div>
     <div class="modal-f">
-      ${canEditTask(s, t) ? html`<button class="btn btn-ghost left" type="button" id="tEdit">${icon('pencil', 'ico sm')}Editar</button>` : ''}
+      ${canEditAll(s, t) ? html`<button class="btn btn-ghost left" type="button" id="tEdit">${icon('pencil', 'ico sm')}Editar</button>` : ''}
       ${done
         ? html`<button class="btn btn-ghost" type="button" data-action="reopen" data-id="${t.id}">${icon('undo', 'ico sm')}Reabrir</button>`
         : html`<button class="btn btn-ok btn-lg" type="button" data-action="done" data-id="${t.id}">${icon('check')}Concluir tarefa</button>`}
     </div>`, { focus: false });
   m.querySelector('#tEdit')?.addEventListener('click', () => openTaskForm(s, { task: t }, after));
+  m.querySelector('#tMove')?.addEventListener('click', () => openMoveForm(s, t, after));
+  m.querySelector('#tTake')?.addEventListener('click', async e => {
+    e.currentTarget.disabled = true;
+    try { await takeTask(s, t, after); } catch (err) { toast(err.message, true); }
+  });
+  fillHistory(s, t, m.querySelector('#tHistory'));
 }
 
 /* ---------- orçamentos ---------- */

@@ -1,4 +1,4 @@
-// Páginas: calendário, tarefas, orçamentos, casas, pessoas e conta.
+// Páginas: calendário, tarefas, orçamentos, casas, pessoas, relatório e conta.
 import { html, icon, avatar, firstName, plural, eur, fmtDate, timeOf, dateOfIso, norm, highlight } from './core.js';
 import { monthWeeks, monthOf, monthTitle, longDate, dayLabel, diffDays, addDays, WEEK_HEAD } from './dates.js';
 
@@ -7,6 +7,12 @@ export const COLOR_NAMES = { azul: 'Azul', laranja: 'Laranja', roxo: 'Roxo', tur
 
 const isDone = t => t.status === 'feita';
 const person = t => ({ name: t.assignee_name, color: t.assignee_color });
+export const forAll = t => t.assignee_id == null;
+
+// Para quem é a tarefa: a pessoa (com a sua cor) ou "Todos".
+export const whoTag = (t, size = 'xs') => forAll(t)
+  ? html`<span class="who all">${icon('users', 'ico sm')}Todos</span>`
+  : html`<span class="who">${avatar(person(t), size)}${firstName(t.assignee_name)}</span>`;
 
 /* ---------- peças comuns ---------- */
 
@@ -20,7 +26,7 @@ export function taskRow(t, s, { showDate = false, showHouse = true } = {}) {
   const today = s.me.today, done = isDone(t);
   const late = !done && t.due_date < today;
   const meta = [
-    s.isAdmin ? html`<span class="who">${avatar(person(t), 'xs')}${firstName(t.assignee_name)}</span>` : null,
+    s.isAdmin || forAll(t) ? whoTag(t) : null,
     showHouse && t.house_name ? html`<span>${t.house_name}</span>` : null,
     showDate || late ? html`<span>${dayLabel(t.due_date, today)}</span>` : null,
     t.due_time ? html`<span>às ${t.due_time}</span>` : null,
@@ -66,6 +72,7 @@ function personFilter(s) {
   return html`<div class="chips" role="group" aria-label="Mostrar tarefas de" style="margin-bottom:16px">
     <button class="chip" type="button" data-action="person" data-id="" aria-pressed="${!s.person}">Todas</button>
     ${people.map(u => html`<button class="chip" type="button" data-action="person" data-id="${u.id}" aria-pressed="${s.person === u.id}">${avatar(u)}${firstName(u.name)}</button>`)}
+    <button class="chip" type="button" data-action="person" data-id="todos" aria-pressed="${s.person === 'todos'}">${icon('users', 'ico sm')}Para todos</button>
   </div>`;
 }
 
@@ -76,7 +83,7 @@ function pushNotice(s) {
   if (p.state === 'needs-install') return html`<div class="notice info">${icon('phone')}<div><b>Receba as tarefas no telemóvel</b><p>No iPhone, primeiro adicione a aplicação ao ecrã principal e abra-a pelo ícone.</p></div>
     <div class="n-act"><a class="btn btn-primary btn-sm" href="#conta">Ver como</a><button class="btn btn-ghost btn-sm" type="button" data-action="dismiss-push">Agora não</button></div></div>`;
   if (p.state === 'denied') return '';
-  return html`<div class="notice info">${icon('bell')}<div><b>Ative as notificações neste aparelho</b><p>Recebe um aviso quando lhe atribuem uma tarefa e às 8h do dia de cada tarefa.</p></div>
+  return html`<div class="notice info">${icon('bell')}<div><b>Ative as notificações neste aparelho</b><p>Recebe um aviso quando lhe atribuem ou mudam uma tarefa e às 8h do dia de cada tarefa.</p></div>
     <div class="n-act"><button class="btn btn-primary btn-sm" type="button" data-action="push-on">Ativar</button><button class="btn btn-ghost btn-sm" type="button" data-action="dismiss-push">Agora não</button></div></div>`;
 }
 
@@ -88,7 +95,7 @@ function dayCell(d, tasks, s) {
   const label = `${longDate(d)}: ${tasks.length ? `${plural(tasks.length, 'tarefa', 'tarefas')}, ${open} por fazer` : 'sem tarefas'}`;
   return html`<button class="${cls}" type="button" data-action="pick-day" data-day="${d}" aria-label="${label}" aria-pressed="${d === s.selected}">
     <span class="d-num">${Number(d.slice(8))}</span>
-    ${tasks.slice(0, 3).map(t => html`<span class="tchip ${isDone(t) ? 'done' : 'open'}">${s.isAdmin ? avatar(person(t), 'xs') : ''}<span>${t.title}</span></span>`)}
+    ${tasks.slice(0, 3).map(t => html`<span class="tchip ${isDone(t) ? 'done' : 'open'}">${forAll(t) ? icon('users', 'ico xs') : s.isAdmin ? avatar(person(t), 'xs') : ''}<span>${t.title}</span></span>`)}
     ${tasks.length > 3 ? html`<span class="more">+${tasks.length - 3}</span>` : ''}
     ${tasks.length ? html`<span class="dots">${tasks.slice(0, 6).map(t => html`<i class="dot ${isDone(t) ? 'done' : 'open'}"></i>`)}</span>` : ''}
   </button>`;
@@ -140,10 +147,12 @@ export function renderTasks(s) {
     ['Amanhã', open.filter(t => t.due_date === tomorrow), '', false],
     ['Próximos dias', open.filter(t => t.due_date > tomorrow), '', true],
   ].filter(([, list]) => list.length);
-  const who = s.isAdmin && s.person ? s.me.users.find(u => u.id === s.person) : null;
+  const who = s.isAdmin && typeof s.person === 'number' ? s.me.users.find(u => u.id === s.person) : null;
+  const title = !s.isAdmin ? 'As minhas tarefas' : s.person === 'todos' ? 'Tarefas para todos' : who ? `Tarefas de ${firstName(who.name)}` : 'Tarefas da equipa';
   return html`<div class="page-head">
-    <div><span class="pill">Tarefas</span><h1>${s.isAdmin ? (who ? `Tarefas de ${firstName(who.name)}` : 'Tarefas da equipa') : 'As minhas tarefas'}</h1>
-      <p class="sub">${open.length ? `${open.length} por fazer${late.length ? ` · ${late.length} ${late.length === 1 ? 'atrasada' : 'atrasadas'}` : ''}` : 'Está tudo feito.'}</p></div>
+    <div><span class="pill">Tarefas</span><h1>${title}</h1>
+      <p class="sub">${open.length ? `${open.length} por fazer${late.length ? ` · ${late.length} ${late.length === 1 ? 'atrasada' : 'atrasadas'}` : ''}` : 'Está tudo feito.'}${s.isAdmin ? '' : ' Inclui as tarefas para todos.'}</p></div>
+    ${s.isAdmin ? html`<div class="actions"><a class="btn btn-ghost" href="#relatorio">${icon('chart')}Relatório mensal</a></div>` : ''}
   </div>
   ${personFilter(s)}
   <section class="card">
@@ -257,6 +266,60 @@ export function renderPeople(s) {
     </div></div>`)}</div></section>`;
 }
 
+/* ---------- relatório mensal (administração) ---------- */
+
+const STATE_LABEL = { a_tempo: ['Feita a tempo', 'done'], atrasada: ['Feita com atraso', 'warn'], nao_feita: ['Não feita', 'open'], por_fazer: ['Por fazer', 'mute'] };
+
+function counts(r) {
+  return html`<div class="r-counts">
+    <span class="rc done"><b>${r.a_tempo}</b>feitas a tempo</span>
+    <span class="rc warn"><b>${r.atrasada}</b>com atraso</span>
+    <span class="rc open"><b>${r.nao_feita}</b>não feitas</span>
+    <span class="rc mute"><b>${r.por_fazer}</b>por fazer</span>
+    <span class="rc mute"><b>${r.adiamentos}</b>${r.adiamentos === 1 ? 'adiamento' : 'adiamentos'}</span>
+  </div>`;
+}
+
+function reportTask(t) {
+  const [label, cls] = STATE_LABEL[t.state];
+  const extra = [
+    t.house_name,
+    t.for_all ? 'para todos' : null,
+    t.done_at ? `feita a ${fmtDate(dateOfIso(t.done_at))}${t.done_by_name && t.for_all ? ` por ${firstName(t.done_by_name)}` : ''}` : null,
+    t.postponed ? `adiada ${t.postponed === 1 ? '1 vez' : `${t.postponed} vezes`}` : null,
+  ].filter(Boolean);
+  return html`<li><span class="r-date num">${fmtDate(t.due_date).slice(0, 5)}</span>
+    <button class="r-title" type="button" data-action="open-report-task" data-id="${t.id}"><b>${t.title}</b>${extra.length ? html`<small>${extra.join(' · ')}</small>` : ''}</button>
+    <span class="st ${cls}">${label}</span></li>`;
+}
+
+export function renderReport(s) {
+  const r = s.report;
+  const done = r.total.a_tempo + r.total.atrasada, all = done + r.total.nao_feita + r.total.por_fazer;
+  return html`<div class="page-head">
+    <div><span class="pill">Relatório mensal</span><h1>${monthTitle(r.month)}</h1>
+      <p class="sub">${all ? `${plural(done, 'tarefa feita', 'tarefas feitas')} de ${all} · ${r.total.nao_feita} não ${r.total.nao_feita === 1 ? 'feita' : 'feitas'}${r.closed ? '' : ' · o mês ainda não terminou'}` : 'Sem tarefas marcadas para este mês.'}</p></div>
+    <div class="cal-bar no-print">
+      <button class="icon-btn" type="button" data-action="report-month" data-step="-1" aria-label="Mês anterior">${icon('chevron-left')}</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="report-month" data-step="0">Este mês</button>
+      <button class="icon-btn" type="button" data-action="report-month" data-step="1" aria-label="Mês seguinte">${icon('chevron-right')}</button>
+    </div>
+  </div>
+  <div class="toolbar no-print">
+    <a class="btn btn-primary" href="/api/report?month=${r.month}&format=csv" download="relatorio-tarefas-${r.month}.csv">${icon('download')}Descarregar (Excel)</a>
+    <button class="btn btn-ghost" type="button" data-action="report-print">${icon('printer')}Imprimir ou guardar PDF</button>
+  </div>
+  <p class="big-note" style="margin-bottom:16px">As tarefas de cada pessoa contam para ela. As tarefas para todos contam para quem as fez. "Não feita" é uma tarefa cuja data já passou sem estar concluída.</p>
+  <div class="stack">
+    ${r.people.map(p => html`<section class="card report-person">
+      <div class="card-h"><h2 class="r-name">${p.person.id == null ? html`<span class="who all">${icon('users', 'ico sm')}</span>` : avatar(p.person)}${p.person.name}</h2>
+        <span class="meta">${plural(p.tasks.length, 'tarefa', 'tarefas')}</span></div>
+      <div class="card-b">${counts(p)}
+        ${p.tasks.length ? html`<ul class="r-tasks">${p.tasks.map(reportTask)}</ul>` : html`<p class="big-note">Sem tarefas neste mês.</p>`}</div>
+    </section>`)}
+  </div>`;
+}
+
 /* ---------- conta ---------- */
 
 function installCard(p) {
@@ -273,10 +336,10 @@ function installCard(p) {
 function pushCard(s) {
   const p = s.push || { state: 'unsupported' };
   const body = {
-    on: html`<div class="notice ok" style="margin:0">${icon('bell')}<div><b>As notificações estão ativas neste aparelho</b><p>Recebe um aviso quando lhe atribuem uma tarefa e às 8h do dia de cada tarefa.${s.isAdmin ? ' Também recebe um aviso quando alguém conclui uma tarefa.' : ''}</p></div></div>
+    on: html`<div class="notice ok" style="margin:0">${icon('bell')}<div><b>As notificações estão ativas neste aparelho</b><p>Recebe um aviso quando lhe atribuem ou mudam uma tarefa e às 8h do dia de cada tarefa.${s.isAdmin ? ' Também recebe um aviso quando alguém conclui uma tarefa e quando o relatório mensal fica pronto.' : ''}</p></div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" type="button" data-action="push-test">${icon('send', 'ico sm')}Enviar notificação de teste</button>
       <button class="btn btn-ghost" type="button" data-action="push-off">${icon('bell-off', 'ico sm')}Desativar</button></div>`,
-    off: html`<p class="big-note">Ative para receber um aviso quando lhe atribuem uma tarefa e às 8h do dia de cada tarefa.</p>
+    off: html`<p class="big-note">Ative para receber um aviso quando lhe atribuem ou mudam uma tarefa e às 8h do dia de cada tarefa.</p>
       <div><button class="btn btn-primary" type="button" data-action="push-on">${icon('bell')}Ativar notificações</button></div>`,
     denied: html`<div class="notice warn" style="margin:0">${icon('bell-off')}<div><b>As notificações estão bloqueadas</b><p>${s.push?.ios ? 'Abra Definições → Notificações → Manutenção e ative "Permitir notificações".' : 'Nas definições do browser ou do telemóvel, permita as notificações deste site e volte aqui.'}</p></div></div>`,
     'needs-install': html`<div class="notice info" style="margin:0">${icon('phone')}<div><b>Primeiro, adicione ao ecrã principal</b><p>No iPhone, as notificações só funcionam com a aplicação aberta pelo ícone do ecrã principal. Siga os passos acima.</p></div></div>`,
@@ -297,7 +360,7 @@ export function renderAccount(s, welcome = false) {
     <section class="card"><div class="card-h"><h2>Palavra-passe</h2></div><div class="card-b">
       <p class="big-note">A palavra-passe nunca sai deste aparelho: a aplicação envia só uma chave calculada a partir dela.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" type="button" data-action="change-password">${icon('key', 'ico sm')}Mudar palavra-passe</button>
-      ${s.isAdmin ? html`<a class="btn btn-ghost" href="#pessoas">${icon('users', 'ico sm')}Pessoas e acessos</a>` : ''}</div>
+      ${s.isAdmin ? html`<a class="btn btn-ghost" href="#pessoas">${icon('users', 'ico sm')}Pessoas e acessos</a><a class="btn btn-ghost" href="#relatorio">${icon('chart', 'ico sm')}Relatório mensal</a>` : ''}</div>
     </div></section>
   </div>`;
 }
