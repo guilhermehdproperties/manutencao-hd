@@ -1,8 +1,11 @@
-// Arranque, navegação por endereço (#calendario, #tarefa-3, #casa-2, #relatorio-2026-10…) e ações dos botões.
+// Arranque, navegação por endereço (#calendario, #tarefa-3, #orcamento-5, #fornecedor-2, #gastos-2026, #relatorio-2026-10…) e ações dos botões.
 import { api, html, icon, toast, closeModal, modalOpen, submitModal } from './core.js';
 import { monthOf, addMonths, monthWeeks } from './dates.js';
-import { renderCalendar, renderTasks, renderQuotes, quoteResults, renderHouses, houseCards, renderHouse, renderPeople, renderAccount, renderReport } from './views.js';
-import { openTaskForm, openTaskDetail, openQuoteForm, openHouseForm, openPersonForm, openInviteModal, openPasswordForm } from './forms.js';
+import { FLOW } from './stages.js';
+import { renderCalendar, renderTasks, renderHouses, houseCards, renderHouse, renderPeople, renderAccount, renderReport } from './views.js';
+import { renderQuotes, quoteResults, renderSuppliers, supplierCards, renderSupplier, renderSpending } from './views-quotes.js';
+import { openTaskForm, openTaskDetail, openHouseForm, openPersonForm, openInviteModal, openPasswordForm } from './forms.js';
+import { openQuoteForm, openQuoteDetail, openSupplierForm, STAGE_FORMS } from './forms-quotes.js';
 import { registerWorker, pushState, enablePush, disablePush, syncSubscription, promptInstall } from './push.js';
 
 const view = document.getElementById('view');
@@ -10,19 +13,25 @@ const state = {
   me: null, isAdmin: false, route: { name: 'calendario' },
   month: null, selected: null, person: null,
   monthTasks: [], list: [], quotes: [], houses: [], house: null, people: [], report: null,
-  quoteFilter: { q: '', house: '', status: '' }, houseQuery: '',
-  push: null, flash: null, loadedAt: 0,
+  suppliers: [], supplier: null, spending: null,
+  quoteFilter: { q: '', house: '', stage: 'curso' }, houseQuery: '', supplierQuery: '',
+  push: null, flash: null, flashQuote: null, loadedAt: 0,
 };
 
-const PAGES = ['calendario', 'tarefas', 'orcamentos', 'casas', 'pessoas', 'conta', 'boas-vindas'];
-const ADMIN_ONLY = ['pessoas', 'relatorio'];
-const TITLES = { calendario: 'Calendário', tarefas: 'Tarefas', orcamentos: 'Orçamentos', casas: 'Casas', pessoas: 'Pessoas', conta: 'Conta', 'boas-vindas': 'Conta', relatorio: 'Relatório' };
+const PAGES = ['calendario', 'tarefas', 'orcamentos', 'fornecedores', 'casas', 'pessoas', 'conta', 'boas-vindas'];
+const ADMIN_ONLY = ['pessoas', 'relatorio', 'gastos'];
+const TITLES = { calendario: 'Calendário', tarefas: 'Tarefas', orcamentos: 'Orçamentos', fornecedores: 'Fornecedores', gastos: 'Gastos', casas: 'Casas', pessoas: 'Pessoas', conta: 'Conta', 'boas-vindas': 'Conta', relatorio: 'Relatório' };
+// Páginas que ficam debaixo de outro separador da barra de navegação.
+const NAV_OF = { casa: 'casas', 'boas-vindas': 'conta', fornecedores: 'orcamentos', fornecedor: 'orcamentos', gastos: 'orcamentos' };
 
 function parseRoute() {
   const h = decodeURIComponent(location.hash.slice(1));
   let m;
   if ((m = h.match(/^tarefa-(\d+)$/))) return { name: 'calendario', task: Number(m[1]) };
+  if ((m = h.match(/^orcamento-(\d+)$/))) return { name: 'orcamentos', quote: Number(m[1]) };
   if ((m = h.match(/^casa-(\d+)$/))) return { name: 'casa', id: Number(m[1]) };
+  if ((m = h.match(/^fornecedor-(\d+)$/))) return { name: 'fornecedor', id: Number(m[1]) };
+  if ((m = h.match(/^gastos(?:-(\d{4}))?$/))) return { name: 'gastos', id: m[1] ? Number(m[1]) : null };
   if ((m = h.match(/^relatorio(?:-(\d{4}-(?:0[1-9]|1[0-2])))?$/))) return { name: 'relatorio', id: m[1] || null };
   return { name: PAGES.includes(h) ? h : 'calendario' };
 }
@@ -46,6 +55,9 @@ async function load(route) {
   }
   if (route.name === 'tarefas') state.list = (await api(`/tasks/list?v=1${who}`)).tasks;
   if (route.name === 'orcamentos') state.quotes = (await api('/quotes')).quotes;
+  if (route.name === 'fornecedores') state.suppliers = (await api('/suppliers')).suppliers;
+  if (route.name === 'fornecedor') state.supplier = await api(`/suppliers/${route.id}`);
+  if (route.name === 'gastos') state.spending = await api(`/spending?year=${route.id || state.me.today.slice(0, 4)}`);
   if (route.name === 'casas') state.houses = (await api('/houses')).houses;
   if (route.name === 'casa') state.house = await api(`/houses/${route.id}`);
   if (route.name === 'pessoas') state.people = (await api('/users')).users;
@@ -55,15 +67,15 @@ async function load(route) {
 function draw() {
   const r = state.route;
   const out = {
-    calendario: renderCalendar, tarefas: renderTasks, orcamentos: renderQuotes, casas: renderHouses, casa: renderHouse,
-    pessoas: renderPeople, conta: s => renderAccount(s), 'boas-vindas': s => renderAccount(s, true), relatorio: renderReport,
+    calendario: renderCalendar, tarefas: renderTasks, orcamentos: renderQuotes, fornecedores: renderSuppliers, fornecedor: renderSupplier, gastos: renderSpending,
+    casas: renderHouses, casa: renderHouse, pessoas: renderPeople, conta: s => renderAccount(s), 'boas-vindas': s => renderAccount(s, true), relatorio: renderReport,
   }[r.name](state);
   view.innerHTML = String(out);
-  const nav = r.name === 'casa' ? 'casas' : r.name === 'boas-vindas' ? 'conta' : r.name;
+  const nav = NAV_OF[r.name] || r.name;
   // No telemóvel, o relatório fica no separador Tarefas.
   document.querySelectorAll('.tabbar [data-nav="tarefas"]').forEach(a => { if (nav === 'relatorio') a.setAttribute('aria-current', 'page'); });
   document.querySelectorAll('[data-nav]').forEach(a => a.setAttribute('aria-current', a.dataset.nav === nav ? 'page' : 'false'));
-  const title = r.name === 'casa' && state.house ? state.house.house.name : TITLES[r.name];
+  const title = r.name === 'casa' && state.house ? state.house.house.name : r.name === 'fornecedor' && state.supplier ? state.supplier.supplier.name : TITLES[r.name];
   document.body.classList.toggle('report-page', r.name === 'relatorio');
   document.title = `${title} · Manutenção HD Properties`;
 }
@@ -75,8 +87,8 @@ async function show({ keepScroll = false } = {}) {
   state.route = next;
   if (changed) view.style.opacity = '.55';
   try {
-    // Endereço vindo de uma notificação: abre o mês da tarefa e o detalhe por cima.
-    let task = null;
+    // Endereço vindo de uma notificação: abre o mês da tarefa (ou o pipeline) e o detalhe por cima.
+    let task = null, quote = null;
     if (next.task) {
       task = (await api(`/tasks/${next.task}`)).task;
       state.month = monthOf(task.due_date);
@@ -84,10 +96,16 @@ async function show({ keepScroll = false } = {}) {
       history.replaceState(null, '', '#calendario');
       state.route = { name: 'calendario' };
     }
+    if (next.quote) {
+      quote = next.quote;
+      history.replaceState(null, '', '#orcamentos');
+      state.route = { name: 'orcamentos' };
+    }
     await load(state.route);
     draw();
     if (changed && !keepScroll) window.scrollTo(0, 0);
     if (task) openTaskDetail(state, state.monthTasks.find(t => t.id === task.id) || task, after);
+    if (quote) openQuoteDetail(state, quote, after);
   } catch (err) {
     view.innerHTML = String(html`<div class="empty-big" style="margin-top:24px">${icon('alert')}<h2>Não foi possível abrir esta página</h2><p>${err.message}</p><a class="btn btn-ghost" href="#calendario">Voltar ao calendário</a></div>`);
   } finally {
@@ -95,11 +113,15 @@ async function show({ keepScroll = false } = {}) {
   }
 }
 
-// Depois de guardar num formulário: no calendário, salta para o dia da tarefa.
-function after(opts = {}) {
+// Depois de guardar num formulário: no calendário, salta para o dia da tarefa; realça a tarefa ou o orçamento.
+async function after(opts = {}) {
+  if (opts.reloadMe) await loadMe().catch(() => {});
   if (opts.date && state.route.name === 'calendario') { state.selected = opts.date; state.month = monthOf(opts.date); }
   state.flash = opts.taskId || null;
-  show({ keepScroll: true }).then(() => { state.flash = null; });
+  state.flashQuote = opts.quoteId || null;
+  await show({ keepScroll: true });
+  state.flash = null;
+  state.flashQuote = null;
 }
 
 async function afterHouse(opts) {
@@ -109,8 +131,15 @@ async function afterHouse(opts) {
 }
 
 const allTasks = () => [...state.monthTasks, ...state.list, ...(state.house?.tasks || [])];
-const allQuotes = () => [...state.quotes, ...(state.house?.quotes || [])];
 const today = () => state.me.today;
+
+// Botões das fases ("Já chegou", "Aprovar"…): vão buscar o orçamento atualizado e abrem a janela certa.
+const quoteAction = form => async el => {
+  el.disabled = true;
+  try { form(state, await api(`/quotes/${el.dataset.id}`), after); }
+  catch (err) { toast(err.message, true); }
+  finally { if (el.isConnected) el.disabled = false; }
+};
 
 async function complete(el, done) {
   const id = Number(el.dataset.id);
@@ -165,10 +194,24 @@ const actions = {
     try { openTaskDetail(state, (await api(`/tasks/${el.dataset.id}`)).task, after); } catch (err) { toast(err.message, true); }
   },
   'new-quote': el => openQuoteForm(state, {
-    house: el.dataset.house ? Number(el.dataset.house) : state.quoteFilter.house ? Number(state.quoteFilter.house) : null,
+    house: el.dataset.house ? Number(el.dataset.house) : state.route.name === 'orcamentos' && state.quoteFilter.house ? Number(state.quoteFilter.house) : null,
+    supplier: el.dataset.supplier ? Number(el.dataset.supplier) : null,
   }, after),
-  'open-quote': el => { const q = allQuotes().find(x => x.id === Number(el.dataset.id)); if (q) openQuoteForm(state, { quote: q }, after); },
-  'quote-status': el => { state.quoteFilter.status = el.dataset.key; draw(); },
+  'open-quote': el => openQuoteDetail(state, Number(el.dataset.id), after),
+  // Tocar outra vez na fase escolhida volta aos orçamentos em curso.
+  'quote-stage': el => {
+    const k = el.dataset.key;
+    state.quoteFilter.stage = state.quoteFilter.stage === k && FLOW.includes(k) ? 'curso' : k;
+    draw();
+  },
+  ...Object.fromEntries(Object.entries(STAGE_FORMS).map(([k, form]) => [k, quoteAction(form)])),
+  'new-supplier': () => openSupplierForm(state, null, after),
+  'edit-supplier': () => openSupplierForm(state, state.supplier.supplier, after),
+  'spending-year': el => {
+    const thisYear = Number(today().slice(0, 4));
+    const year = Number(el.dataset.step) ? state.spending.year + Number(el.dataset.step) : thisYear;
+    location.hash = year === thisYear ? 'gastos' : `gastos-${year}`;
+  },
   'new-house': () => openHouseForm(state, null, afterHouse),
   'edit-house': () => openHouseForm(state, state.house.house, afterHouse),
   'new-person': () => openPersonForm(state, null, async () => { await loadMe(); show({ keepScroll: true }); }),
@@ -212,6 +255,9 @@ document.addEventListener('click', e => {
   const closer = e.target.closest('[data-close]');
   // O fundo escuro só fecha a janela quando o toque é mesmo no fundo.
   if (closer && (!closer.matches('.scrim') || e.target === closer)) { e.preventDefault(); closeModal(); return; }
+  // Tocar no separador da página que já está aberta atualiza-a (por exemplo, para ver o que os outros mudaram).
+  const link = e.target.closest('a[href^="#"]');
+  if (link && link.getAttribute('href') === location.hash && !modalOpen()) show({ keepScroll: true });
   const el = e.target.closest('[data-action]');
   if (!el || !actions[el.dataset.action]) return;
   e.preventDefault();
@@ -227,6 +273,30 @@ document.addEventListener('keydown', e => {
 document.addEventListener('input', e => {
   if (e.target.id === 'quoteSearch') { state.quoteFilter.q = e.target.value; document.getElementById('quoteResults').innerHTML = String(quoteResults(state)); }
   if (e.target.id === 'houseSearch') { state.houseQuery = e.target.value; document.getElementById('houseResults').innerHTML = String(houseCards(state)); }
+  if (e.target.id === 'supplierSearch') { state.supplierQuery = e.target.value; document.getElementById('supplierResults').innerHTML = String(supplierCards(state)); }
+});
+
+// Gráfico dos gastos: o valor de cada mês aparece ao passar o rato ou ao tocar na coluna.
+function chartTip(e) {
+  const chart = e.target.closest?.('[data-chart]');
+  if (!chart) return;
+  const tip = chart.querySelector('.mc-tip'), col = e.target.closest('.mc-col');
+  if (!col) { tip.hidden = true; return; }
+  const plot = tip.parentElement.getBoundingClientRect(), r = col.getBoundingClientRect();
+  tip.textContent = col.dataset.tip;
+  tip.hidden = false;
+  const half = tip.offsetWidth / 2;
+  tip.style.left = `${Math.min(Math.max(r.left + r.width / 2 - plot.left, half), plot.width - half)}px`;
+}
+document.addEventListener('pointerover', chartTip);
+document.addEventListener('focusin', chartTip);
+document.addEventListener('pointerout', e => {
+  const chart = e.target.closest?.('[data-chart]');
+  if (chart && !chart.contains(e.relatedTarget)) chart.querySelector('.mc-tip').hidden = true;
+});
+document.addEventListener('focusout', e => {
+  const chart = e.target.closest?.('[data-chart]');
+  if (chart && !chart.contains(e.relatedTarget)) chart.querySelector('.mc-tip').hidden = true;
 });
 
 document.addEventListener('change', e => {

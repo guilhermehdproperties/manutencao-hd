@@ -6,9 +6,11 @@ import { noticeCreated, noticeChanged, noticeDone } from './notify.js';
 import { todayLisbon } from '../public/js/dates.js';
 
 const TASK_SELECT = `SELECT t.*, h.name AS house_name, a.name AS assignee_name, a.color AS assignee_color,
-    d.name AS done_by_name, c.name AS created_by_name
+    d.name AS done_by_name, c.name AS created_by_name,
+    qo.description AS quote_description, COALESCE(qs.name, qo.supplier) AS quote_supplier, qo.status AS quote_status, qo.amount AS quote_amount
   FROM tasks t LEFT JOIN houses h ON h.id = t.house_id LEFT JOIN users a ON a.id = t.assignee_id
-  LEFT JOIN users d ON d.id = t.done_by LEFT JOIN users c ON c.id = t.created_by`;
+  LEFT JOIN users d ON d.id = t.done_by LEFT JOIN users c ON c.id = t.created_by
+  LEFT JOIN quotes qo ON qo.id = t.quote_id LEFT JOIN suppliers qs ON qs.id = qo.supplier_id`;
 
 const ORDER = 'ORDER BY t.due_date, t.due_time IS NULL, t.due_time, t.id';
 
@@ -111,7 +113,10 @@ export function registerTasks(api) {
   api.post('/api/tasks', async ({ db, env, ctx, req, user }) => {
     const b = await body(req);
     const row = await taskInput(db, { assignee_id: user.id, ...b });
-    const tid = await db.insert('tasks', { ...row, created_by: user.id });
+    // Tarefa ligada a um orçamento (por exemplo, acompanhar o trabalho aprovado).
+    const quote = optId(b.quote_id);
+    if (quote && !await db.first('SELECT 1 FROM quotes WHERE id = ?', quote)) throw bad('Orçamento inválido.');
+    const tid = await db.insert('tasks', { ...row, quote_id: quote, created_by: user.id });
     await db.run(`INSERT INTO task_events (task_id, user_id, kind) VALUES (?, ?, 'criada')`, tid, user.id);
     later(ctx, noticeCreated(db, env, tid, user));
     return json({ id: tid }, 201);

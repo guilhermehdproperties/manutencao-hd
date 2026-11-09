@@ -13,7 +13,8 @@ const TASKS_TABLE = `CREATE TABLE IF NOT EXISTS tasks (
     done_by INTEGER,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
+    updated_at TEXT,
+    quote_id INTEGER REFERENCES quotes(id) ON DELETE SET NULL -- tarefa de acompanhar um orçamento aprovado
   )`;
 const TASK_COLUMNS = 'id, title, notes, house_id, assignee_id, due_date, due_time, status, done_at, done_by, created_by, created_at, updated_at';
 
@@ -61,6 +62,18 @@ const SCHEMA = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
   `CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id)`,
+  `CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    specialty TEXT,
+    phone TEXT,
+    email TEXT,
+    notes TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  // Fases: pedido, por_decidir, aprovado, feito, pago, recusado. group_id junta os orçamentos do mesmo trabalho.
   `CREATE TABLE IF NOT EXISTS quotes (
     id INTEGER PRIMARY KEY,
     house_id INTEGER NOT NULL REFERENCES houses(id),
@@ -68,13 +81,29 @@ const SCHEMA = [
     description TEXT NOT NULL,
     amount REAL,
     quote_date TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pendente',
+    status TEXT NOT NULL DEFAULT 'por_decidir',
     notes TEXT,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
+    updated_at TEXT,
+    supplier_id INTEGER REFERENCES suppliers(id),
+    group_id INTEGER,
+    final_amount REAL,
+    paid_at TEXT,
+    stage_at TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS quotes_house ON quotes(house_id)`,
+  `CREATE TABLE IF NOT EXISTS quote_events (
+    id INTEGER PRIMARY KEY,
+    quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+    user_id INTEGER,
+    kind TEXT NOT NULL,
+    from_value TEXT,
+    to_value TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS quote_events_quote ON quote_events(quote_id)`,
   `CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY,
     quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
@@ -83,7 +112,8 @@ const SCHEMA = [
     size INTEGER,
     stored TEXT NOT NULL,
     created_by INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    kind TEXT NOT NULL DEFAULT 'orcamento'
   )`,
   `CREATE INDEX IF NOT EXISTS files_quote ON files(quote_id)`,
   `CREATE TABLE IF NOT EXISTS push_subs (
@@ -126,9 +156,42 @@ async function migrate(D) {
   ]);
 }
 
+const columnsOf = async (D, table) => (await D.prepare(`PRAGMA table_info(${table})`).all()).results.map(c => c.name);
+
+// Colunas acrescentadas depois da primeira versão (pipeline dos orçamentos, fornecedores, faturas, tarefas ligadas).
+// Só se acrescenta; nada é apagado. Os estados antigos dos orçamentos passam para as fases novas.
+const ADDED = {
+  quotes: { supplier_id: 'INTEGER REFERENCES suppliers(id)', group_id: 'INTEGER', final_amount: 'REAL', paid_at: 'TEXT', stage_at: 'TEXT' },
+  files: { kind: "TEXT NOT NULL DEFAULT 'orcamento'" },
+  tasks: { quote_id: 'INTEGER REFERENCES quotes(id) ON DELETE SET NULL' },
+};
+
+async function migrateAfter(D) {
+  const steps = [];
+  for (const [table, cols] of Object.entries(ADDED)) {
+    const have = await columnsOf(D, table);
+    for (const [col, type] of Object.entries(cols)) if (!have.includes(col)) steps.push(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  }
+  steps.push(
+    `CREATE INDEX IF NOT EXISTS quotes_group ON quotes(group_id)`,
+    `CREATE INDEX IF NOT EXISTS quotes_status ON quotes(status)`,
+    `CREATE INDEX IF NOT EXISTS quotes_supplier ON quotes(supplier_id)`,
+    `CREATE INDEX IF NOT EXISTS tasks_quote ON tasks(quote_id)`,
+    `UPDATE quotes SET status = 'por_decidir' WHERE status = 'pendente'`,
+    `UPDATE quotes SET status = 'aprovado' WHERE status = 'aceite'`,
+    `UPDATE quotes SET stage_at = COALESCE(updated_at, created_at) WHERE stage_at IS NULL`,
+    `INSERT OR IGNORE INTO suppliers (name) SELECT DISTINCT supplier FROM quotes WHERE supplier_id IS NULL AND supplier IS NOT NULL`,
+    `UPDATE quotes SET supplier_id = (SELECT s.id FROM suppliers s WHERE s.name = quotes.supplier) WHERE supplier_id IS NULL`,
+  );
+  await D.batch(steps.map(s => D.prepare(s)));
+}
+
 // Acesso à base de dados com funções curtas; cria as tabelas na primeira utilização.
 export async function openDb(env) {
-  ready ??= migrate(env.DB).then(() => env.DB.batch(SCHEMA.map(s => env.DB.prepare(s)))).catch(e => { ready = null; throw e; });
+  ready ??= migrate(env.DB)
+    .then(() => env.DB.batch(SCHEMA.map(s => env.DB.prepare(s))))
+    .then(() => migrateAfter(env.DB))
+    .catch(e => { ready = null; throw e; });
   await ready;
   const D = env.DB;
   const stmt = (sql, args) => D.prepare(sql).bind(...args.map(a => a === undefined ? null : a));

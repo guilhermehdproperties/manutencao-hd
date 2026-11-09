@@ -1,8 +1,9 @@
-// Páginas: calendário, tarefas, orçamentos, casas, pessoas, relatório e conta.
-import { html, icon, avatar, firstName, plural, eur, fmtDate, timeOf, dateOfIso, norm, highlight } from './core.js';
+// Páginas: calendário, tarefas, casas, pessoas, relatório e conta. Os orçamentos estão em views-quotes.js.
+import { html, icon, avatar, firstName, plural, fmtDate, timeOf, dateOfIso, norm, highlight } from './core.js';
 import { monthWeeks, monthOf, monthTitle, longDate, dayLabel, diffDays, addDays, WEEK_HEAD } from './dates.js';
+import { quoteCard, byStageOrder } from './views-quotes.js';
+import { OPEN_STAGES } from './stages.js';
 
-export const QUOTE_STATUS = { pendente: ['Pendente', 'warn'], aceite: ['Aceite', 'done'], recusado: ['Recusado', 'mute'] };
 export const COLOR_NAMES = { azul: 'Azul', laranja: 'Laranja', roxo: 'Roxo', turquesa: 'Turquesa', rosa: 'Rosa', castanho: 'Castanho', amarelo: 'Amarelo', cinzento: 'Cinzento' };
 
 const isDone = t => t.status === 'feita';
@@ -42,27 +43,6 @@ export function taskRow(t, s, { showDate = false, showHouse = true } = {}) {
       ? html`<button class="btn btn-ghost btn-sm" type="button" data-action="reopen" data-id="${t.id}" aria-label="Reabrir: ${t.title}">${icon('undo', 'ico sm')}Reabrir</button>`
       : html`<button class="btn btn-ok btn-sm" type="button" data-action="done" data-id="${t.id}" aria-label="Concluir: ${t.title}">${icon('check', 'ico sm')}Concluir</button>`}</div>
   </article>`;
-}
-
-export const statusPill = status => {
-  const [label, cls] = QUOTE_STATUS[status] || [status, 'mute'];
-  return html`<span class="st ${cls}">${label}</span>`;
-};
-
-export const fileChip = f => html`<a class="file" href="/ficheiros/${f.id}" target="_blank" rel="noopener">${icon(String(f.mime).startsWith('image/') ? 'image' : 'file', 'ico sm')}<span>${f.name}</span></a>`;
-
-export function quoteRow(q, query = '') {
-  return html`<div class="quote">
-    <span class="r-ico">${icon('file')}</span>
-    <button class="q-main" type="button" data-action="open-quote" data-id="${q.id}">
-      <span class="q-house">${highlight(q.house_name, query)}</span>
-      <span class="q-title">${highlight(q.description, query)}</span>
-      <span class="q-sub"><span>${highlight(q.supplier, query)}</span><span>${fmtDate(q.quote_date)}</span>${q.created_by_name ? html`<span>registado por ${firstName(q.created_by_name)}</span>` : ''}</span>
-      ${q.files.length ? '' : html`<span class="q-sub">Sem documento anexado</span>`}
-    </button>
-    <div class="q-side">${q.amount != null ? html`<span class="q-val">${eur(q.amount)}</span>` : ''}${statusPill(q.status)}</div>
-    ${q.files.length ? html`<div class="files q-files">${q.files.map(fileChip)}</div>` : ''}
-  </div>`;
 }
 
 function personFilter(s) {
@@ -164,40 +144,6 @@ export function renderTasks(s) {
     <section class="card"><div class="tasks">${done.map(t => taskRow(t, s, { showDate: true }))}</div></section>` : ''}`;
 }
 
-/* ---------- orçamentos ---------- */
-
-export function filterQuotes(quotes, f) {
-  const q = norm(f.q).trim();
-  return quotes.filter(x => (!f.house || x.house_id === Number(f.house)) && (!f.status || x.status === f.status)
-    && (!q || norm([x.house_name, x.supplier, x.description, x.notes].join(' ')).includes(q)));
-}
-
-export function quoteResults(s) {
-  const list = filterQuotes(s.quotes, s.quoteFilter);
-  if (!s.quotes.length) return html`<div class="empty"><p>Ainda não há orçamentos registados.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-quote">${icon('plus', 'ico sm')}Novo orçamento</button></div>`;
-  if (!list.length) return html`<div class="empty"><p>Nenhum orçamento corresponde à pesquisa.</p></div>`;
-  return html`<div class="qlist">${list.map(q => quoteRow(q, s.quoteFilter.q))}</div>`;
-}
-
-export function renderQuotes(s) {
-  const f = s.quoteFilter;
-  const pend = s.quotes.filter(q => q.status === 'pendente').length;
-  const houses = s.me.houses.filter(h => h.active || s.quotes.some(q => q.house_id === h.id));
-  return html`<div class="page-head">
-    <div><span class="pill">Orçamentos de fornecedores</span><h1>Orçamentos</h1>
-      <p class="sub">${s.quotes.length ? `${plural(s.quotes.length, 'orçamento', 'orçamentos')} · ${plural(pend, 'pendente', 'pendentes')}` : 'Registe aqui os orçamentos que recebem dos fornecedores.'}</p></div>
-    <div class="actions"><button class="btn btn-primary" type="button" data-action="new-quote">${icon('plus')}Novo orçamento</button></div>
-  </div>
-  <div class="toolbar">
-    <label class="search">${icon('search')}<input id="quoteSearch" type="search" value="${f.q}" placeholder="Pesquisar pela casa, fornecedor ou descrição" aria-label="Pesquisar orçamentos" autocomplete="off"></label>
-    <select class="inline" id="quoteHouse" aria-label="Casa"><option value="">Todas as casas</option>${houses.map(h => html`<option value="${h.id}"${String(h.id) === String(f.house) ? ' selected' : ''}>${h.name}</option>`)}</select>
-    <div class="chips" role="group" aria-label="Estado">
-      ${[['', 'Todos'], ['pendente', 'Pendentes'], ['aceite', 'Aceites'], ['recusado', 'Recusados']].map(([k, l]) => html`<button class="chip" type="button" data-action="quote-status" data-key="${k}" aria-pressed="${f.status === k}">${l}</button>`)}
-    </div>
-  </div>
-  <section class="card" id="quoteResults">${quoteResults(s)}</section>`;
-}
-
 /* ---------- casas ---------- */
 
 export function houseCards(s) {
@@ -236,8 +182,8 @@ export function renderHouse(s) {
     </div>
   </div>
   <div class="two">
-    <section class="card"><div class="card-h"><h2>Orçamentos</h2><span class="meta">${quotes.length}</span></div>
-      ${quotes.length ? html`<div class="qlist">${quotes.map(q => quoteRow(q))}</div>` : html`<div class="empty"><p>Sem orçamentos desta casa.</p></div>`}</section>
+    <section class="card"><div class="card-h"><h2>Orçamentos</h2><span class="meta">${quotes.filter(q => OPEN_STAGES.includes(q.status)).length} em curso · ${quotes.length} no total</span></div>
+      ${quotes.length ? html`<div class="q-cards in-card one">${byStageOrder(quotes).map(q => quoteCard(q, s, { house: false }))}</div>` : html`<div class="empty"><p>Sem orçamentos desta casa.</p></div>`}</section>
     <section class="card"><div class="card-h"><h2>Tarefas</h2><span class="meta">${open.length} por fazer</span></div>
       ${tasks.length ? html`<div class="tasks">${[...open.sort((a, b) => a.due_date.localeCompare(b.due_date)), ...tasks.filter(isDone)].map(t => taskRow(t, s, { showDate: true, showHouse: false }))}</div>` : html`<div class="empty"><p>Sem tarefas desta casa.</p></div>`}</section>
   </div>`;

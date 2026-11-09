@@ -16,7 +16,13 @@ Aplicação de tarefas de manutenção e orçamentos das casas da HD Properties,
 - Avisos: tarefa nova ou passada (a quem a recebe; nas de todos, à equipa), data mudada (a quem a tem), tarefas do dia às 8h de Lisboa (uma vez por tarefa, pessoa e dia), tarefa concluída (à administração e, nas de todos, ao resto da equipa), relatório pronto no dia 1 (à administração). Das mudanças, nunca se avisa quem as fez nem a administração (exceto se a tarefa for dela).
 - Relatório mensal (`worker/report.js`): tarefas com data no mês; feita a tempo se concluída até ao dia marcado (Lisboa), não feita se a data passou sem estar concluída. As tarefas de uma pessoa contam para ela; as de todos para quem as fez (ou "Para todos (por concluir)"). Adiamentos = mudanças de data para um dia mais tarde, contadas para quem as fez.
 - As casas começam vazias; quem usa a aplicação acrescenta-as.
-- Orçamentos: casa, fornecedor, descrição, valor, data, estado (pendente, aceite, recusado) e documentos.
+- Orçamentos (pipeline, `public/js/stages.js`): `pedido` → `por_decidir` → `aprovado` → `feito` → `pago`, ou `recusado`. A equipa só passa um pedido a por decidir ("Já chegou") e um aprovado a feito ("Trabalho feito"); aprovar, recusar, pagar e corrigir a fase é da administração. Cada mudança fica em `quote_events` (histórico).
+- Orçamentos do mesmo trabalho partilham `group_id` (o id do primeiro); ao aprovar um, os outros ainda em pedido ou por decidir passam a recusados. Ao aprovar pode criar-se a tarefa de acompanhar (`tasks.quote_id`).
+- Fornecedores na tabela `suppliers` (nome único sem distinguir maiúsculas); `quotes.supplier` guarda também o nome. Qualquer pessoa cria e atualiza contactos; arquivar é da administração. WhatsApp só para telemóveis portugueses (9xx) ou números com indicativo.
+- Gastos (só administração, `worker/spending.js`): orçamentos pagos no ano pela data do pagamento e pelo valor final (`final_amount`, ou o orçado se não houver).
+- Avisos dos orçamentos: por decidir e trabalho feito (à administração); aprovado e recusado (a quem o registou); pedido há 7 dias sem resposta (uma vez, a quem o pediu). Nunca a quem fez a mudança.
+- Documentos dos orçamentos (`files.kind`: orcamento, fatura, outro) no KV; qualquer pessoa junta, apagar só quem juntou, quem registou o orçamento ou a administração.
+- A base de dados atualiza-se sozinha no arranque (`worker/db.js`: `migrate` e `migrateAfter`, só acrescentam colunas ou copiam dados). Nunca apagar tabelas da D1 de produção.
 
 ## Trabalhar no código
 - `npm test` e `npm run dev` (com `.dev.vars`).

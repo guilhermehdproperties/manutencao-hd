@@ -1,6 +1,14 @@
 // Utilitários partilhados: HTML seguro, pedidos ao servidor, formatação, pessoas e janelas.
 import { fmtDate } from './dates.js';
 
+// Telemóveis mais antigos (por exemplo, iPhone com iOS 16) ainda não têm Map.groupBy.
+Map.groupBy ??= (items, key) => {
+  const out = new Map();
+  let i = 0;
+  for (const x of items) { const k = key(x, i++); if (out.has(k)) out.get(k).push(x); else out.set(k, [x]); }
+  return out;
+};
+
 /* ---------- HTML com escape automático ---------- */
 
 class Safe { constructor(s) { this.s = s; } toString() { return this.s; } }

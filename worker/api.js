@@ -8,20 +8,22 @@ import { todayLisbon } from '../public/js/dates.js';
 import { registerTasks, visibleTasksSql } from './api-tasks.js';
 import { registerQuotes, quotesWithFiles } from './api-quotes.js';
 import { registerReport } from './api-report.js';
+import { registerSuppliers } from './api-suppliers.js';
 
 export const api = new Router();
 
 /* ---------- sessão ---------- */
 
 api.get('/api/me', async ({ db, user }) => {
-  const [users, houses, devices, keys] = await Promise.all([
+  const [users, houses, suppliers, devices, keys] = await Promise.all([
     db.all(`SELECT * FROM users ${isAdmin(user) ? '' : 'WHERE active = 1'} ORDER BY active DESC, name COLLATE NOCASE`),
     db.all('SELECT * FROM houses ORDER BY active DESC, name COLLATE NOCASE'),
+    db.all('SELECT id, name, specialty, phone, active FROM suppliers ORDER BY active DESC, name COLLATE NOCASE'),
     db.first('SELECT COUNT(*) AS n FROM push_subs WHERE user_id = ?', user.id),
     vapidKeys(db),
   ]);
   const people = users.map(u => isAdmin(user) || u.id === user.id ? publicUser(u) : { ...publicUser(u), username: undefined });
-  return json({ today: todayLisbon(), user: publicUser(user), users: people, houses, vapid: keys.public, devices: devices.n });
+  return json({ today: todayLisbon(), user: publicUser(user), users: people, houses, suppliers, vapid: keys.public, devices: devices.n });
 });
 
 api.put('/api/me/password', async ({ db, req, user, secret, secure }) => {
@@ -208,3 +210,4 @@ api.post('/api/push/test', async ({ db, env, user }) => json(await notifyUser(db
 registerTasks(api);
 registerQuotes(api);
 registerReport(api);
+registerSuppliers(api);

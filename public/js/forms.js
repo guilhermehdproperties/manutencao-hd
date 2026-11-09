@@ -1,27 +1,29 @@
-// Janelas com formulários: tarefa, mudar data ou pessoa, detalhe com histórico, orçamento (com documentos), casa, pessoa, convite e palavra-passe.
-import { html, icon, api, toast, openModal, closeModal, modalHead, field, readForm, showFormError, busy, confirmDialog, avatar, firstName, norm, parseNum } from './core.js';
+// Janelas com formulários: tarefa, mudar data ou pessoa, detalhe com histórico, casa, pessoa, convite e palavra-passe.
+// As janelas dos orçamentos e dos fornecedores estão em forms-quotes.js.
+import { html, icon, api, toast, openModal, closeModal, modalHead, field, readForm, showFormError, busy, confirmDialog, avatar, firstName, norm, eur } from './core.js';
 import { longDate } from './dates.js';
 import { passwordKey } from './kdf.js';
-import { fileChip, doneWhen, COLOR_NAMES, QUOTE_STATUS } from './views.js';
+import { STAGES } from './stages.js';
+import { doneWhen, COLOR_NAMES } from './views.js';
 
 const NEW_HOUSE = 'nova';
 
 /* ---------- casa dentro dos formulários ---------- */
 
-function houseField(houses, value, { optional = false } = {}) {
+export function houseField(houses, value, { optional = false } = {}) {
   const list = houses.filter(h => h.active || h.id === Number(value));
   const options = [['', optional ? 'Sem casa' : '— Escolha a casa —'], ...list.map(h => [h.id, h.name]), [NEW_HOUSE, '+ Nova casa…']];
   return html`${field('Casa', 'house_id', { value: value ?? '', options, full: true })}
     <div class="field full" id="newHouseBox" hidden><label for="f-new_house">Nome da nova casa</label><input id="f-new_house" name="new_house" autocomplete="off" maxlength="80"></div>`;
 }
 
-function wireHouseField(modal) {
+export function wireHouseField(modal) {
   const sel = modal.querySelector('#f-house_id'), box = modal.querySelector('#newHouseBox');
   sel.addEventListener('change', () => { box.hidden = sel.value !== NEW_HOUSE; if (!box.hidden) box.querySelector('input').focus(); });
 }
 
 // Cria a casa nova (se for o caso) e devolve o identificador da casa escolhida.
-async function resolveHouse(d, s) {
+export async function resolveHouse(d, s) {
   if (d.house_id !== NEW_HOUSE) return d.house_id ? Number(d.house_id) : null;
   const name = (d.new_house || '').trim();
   if (!name) throw new Error('Escreva o nome da nova casa.');
@@ -40,13 +42,13 @@ const ALL = 'todos';
 const assigneeValue = t => t.assignee_id ?? ALL;
 const nameOf = (s, uid) => s.me.users.find(u => u.id === Number(uid))?.name || 'outra pessoa';
 
-function assigneeField(s, value, keepId = null) {
+export function assigneeField(s, value, keepId = null) {
   const people = s.me.users.filter(u => u.active || u.id === keepId);
   const options = [['', '— Escolha —'], [ALL, 'Todos (qualquer pessoa da equipa)'], ...people.map(u => [u.id, u.id === s.me.user.id ? `${u.name} (eu)` : u.name])];
   return field('Para quem', 'assignee_id', { value, full: true, options, hint: 'As tarefas para todos aparecem no calendário de toda a equipa.' });
 }
 
-const assigneeBody = v => v === ALL ? null : Number(v);
+export const assigneeBody = v => v === ALL ? null : Number(v);
 
 function movedToast(s, before, assignee) {
   if ((before.assignee_id ?? null) === assignee) return 'Tarefa mudada.';
@@ -55,13 +57,14 @@ function movedToast(s, before, assignee) {
   return `Tarefa passada a ${firstName(nameOf(s, assignee))}.`;
 }
 
-export function openTaskForm(s, { task = null, date = null, house = null } = {}, after) {
+export function openTaskForm(s, { task = null, date = null, house = null, quote = null } = {}, after) {
   const initial = task ? assigneeValue(task) : s.isAdmin ? (s.person ?? '') : s.me.user.id;
-  const m = openModal(html`${modalHead(task ? 'Editar tarefa' : 'Nova tarefa', task ? '' : 'Aparece no calendário de quem a vai fazer, que recebe um aviso no telemóvel.')}
+  const sub = task ? '' : quote ? `Ligada ao orçamento de ${quote.supplier_name}: ${quote.description}` : 'Aparece no calendário de quem a vai fazer, que recebe um aviso no telemóvel.';
+  const m = openModal(html`${modalHead(task ? 'Editar tarefa' : 'Nova tarefa', sub)}
     <form class="modal-b" id="taskForm" novalidate>
       <div class="form-error" hidden></div>
       <div class="form-grid">
-        ${field('O que é preciso fazer', 'title', { value: task?.title, full: true, attrs: 'required maxlength="160" autocomplete="off"', placeholder: 'Ex.: Trocar a lâmpada da cozinha' })}
+        ${field('O que é preciso fazer', 'title', { value: task?.title ?? (quote ? `${quote.description} (${quote.supplier_name})`.slice(0, 160) : ''), full: true, attrs: 'required maxlength="160" autocomplete="off"', placeholder: 'Ex.: Trocar a lâmpada da cozinha' })}
         ${assigneeField(s, initial, task?.assignee_id)}
         ${houseField(s.me.houses, task?.house_id ?? house, { optional: true })}
         ${field('Data', 'due_date', { type: 'date', value: task?.due_date || date || s.me.today, attrs: 'required' })}
@@ -84,7 +87,7 @@ export function openTaskForm(s, { task = null, date = null, house = null } = {},
       if (!d.due_date) throw new Error('Escolha a data.');
       await busy(btn, async () => {
         const assignee = assigneeBody(d.assignee_id);
-        const body = { title: d.title, assignee_id: assignee, house_id: await resolveHouse(d, s), due_date: d.due_date, due_time: d.due_time || null, notes: d.notes };
+        const body = { title: d.title, assignee_id: assignee, house_id: await resolveHouse(d, s), due_date: d.due_date, due_time: d.due_time || null, notes: d.notes, ...(quote ? { quote_id: quote.id } : {}) };
         const r = task ? await api(`/tasks/${task.id}`, { method: 'PUT', body }) : await api('/tasks', { method: 'POST', body });
         closeModal();
         toast(task ? 'Tarefa guardada.' : assignee === null ? 'Tarefa criada para todos.' : assignee !== s.me.user.id ? `Tarefa criada para ${firstName(nameOf(s, assignee))}.` : 'Tarefa criada.');
@@ -141,7 +144,7 @@ export async function takeTask(s, t, after) {
 
 /* ---------- histórico da tarefa ---------- */
 
-const eventTime = iso => {
+export const eventTime = iso => {
   const d = new Date(iso.replace(' ', 'T') + 'Z');
   return d.toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' }).replace(',', ' às');
 };
@@ -187,6 +190,10 @@ export function openTaskDetail(s, t, after) {
         ${t.created_by_name && t.created_by !== t.assignee_id ? html`<dt>Criada por</dt><dd>${t.created_by_name}</dd>` : ''}
       </dl>
       ${t.notes ? html`<div class="d-notes">${t.notes}</div>` : ''}
+      ${t.quote_id ? html`<div class="quote-link">${icon('file')}<div><b>${t.quote_description}</b>
+        <span>${[t.quote_supplier, t.quote_amount != null ? eur(t.quote_amount) : null, `orçamento ${(STAGES[t.quote_status]?.label || '').toLowerCase()}`].filter(Boolean).join(' · ')}</span></div>
+        <div class="ql-act"><a class="btn btn-ghost btn-sm" href="#orcamento-${t.quote_id}">${icon('file', 'ico sm')}Ver orçamento</a>
+          ${t.quote_status === 'aprovado' ? html`<button class="btn btn-ghost btn-sm" type="button" data-action="q-done" data-id="${t.quote_id}">${icon('wrench', 'ico sm')}Trabalho feito</button>` : ''}</div></div>` : ''}
       ${done ? html`<div class="done-box">${icon('check-circle')}<span>Feita${t.done_by_name ? ` por ${t.done_by_name}` : ''} ${doneWhen(t, s.me.today)}</span></div>` : ''}
       ${!done ? html`<div class="detail-acts">
         <button class="btn btn-ghost" type="button" id="tMove">${icon('calendar', 'ico sm')}Mudar data ou pessoa</button>
@@ -207,106 +214,6 @@ export function openTaskDetail(s, t, after) {
     try { await takeTask(s, t, after); } catch (err) { toast(err.message, true); }
   });
   fillHistory(s, t, m.querySelector('#tHistory'));
-}
-
-/* ---------- orçamentos ---------- */
-
-const TYPE_BY_EXT = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif', gif: 'image/gif', txt: 'text/plain', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-
-// Fotografias grandes são reduzidas no telemóvel antes de serem enviadas.
-async function shrink(file) {
-  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 500_000) return file;
-  try {
-    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas');
-    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
-    const g = c.getContext('2d');
-    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-    g.drawImage(bmp, 0, 0, c.width, c.height);
-    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
-    return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
-  } catch { return file; }
-}
-
-async function uploadFiles(quoteId, files, onProgress) {
-  let n = 0;
-  for (const original of files) {
-    onProgress?.(++n, files.length);
-    if (original.size > 20 * 1024 * 1024) throw new Error(`"${original.name}" tem mais de 20 MB.`);
-    let file = await shrink(original);
-    if (!file.type) file = new File([file], file.name, { type: TYPE_BY_EXT[file.name.split('.').pop().toLowerCase()] || 'application/octet-stream' });
-    await api(`/quotes/${quoteId}/files?${new URLSearchParams({ name: file.name })}`, { method: 'POST', raw: file });
-  }
-}
-
-const moneyInput = n => n == null ? '' : String(n).replace('.', ',');
-
-export function openQuoteForm(s, { quote = null, house = null } = {}, after) {
-  const canEdit = !quote || s.isAdmin || quote.created_by === s.me.user.id;
-  const remove = new Set();
-  const m = openModal(html`${modalHead(quote ? (canEdit ? 'Editar orçamento' : 'Orçamento') : 'Novo orçamento', quote ? `${quote.house_name} · ${quote.supplier}` : 'Fica associado à casa, com o documento do fornecedor.')}
-    <form class="modal-b" id="quoteForm" novalidate>
-      <div class="form-error" hidden></div>
-      <fieldset ${canEdit ? '' : 'disabled'} style="border:0;padding:0;margin:0;min-width:0">
-      <div class="form-grid">
-        ${houseField(s.me.houses, quote?.house_id ?? house)}
-        ${field('Fornecedor', 'supplier', { value: quote?.supplier, full: true, attrs: 'required maxlength="120" autocomplete="off"', placeholder: 'Ex.: Canalizações Silva, Lda.' })}
-        ${field('O que foi orçamentado', 'description', { value: quote?.description, full: true, attrs: 'required maxlength="300" autocomplete="off"', placeholder: 'Ex.: Substituição do esquentador' })}
-        ${field('Valor (€)', 'amount', { value: moneyInput(quote?.amount), attrs: 'inputmode="decimal" autocomplete="off"', placeholder: '0,00' })}
-        ${field('Data do orçamento', 'quote_date', { type: 'date', value: quote?.quote_date || s.me.today })}
-        ${field('Estado', 'status', { value: quote?.status || 'pendente', full: true, options: Object.entries(QUOTE_STATUS).map(([k, [l]]) => [k, l]) })}
-        ${field('Notas', 'notes', { type: 'textarea', value: quote?.notes, full: true })}
-      </div></fieldset>
-      <div class="field">
-        <label for="f-files">Documento do orçamento</label>
-        ${quote?.files.length ? html`<div class="files" id="qFiles">${quote.files.map(f => html`<span class="files" data-file="${f.id}" style="margin:0">${fileChip(f)}${canEdit ? html`<button class="btn btn-ghost btn-sm btn-icon" type="button" data-remove="${f.id}" aria-label="Apagar ${f.name}">${icon('x', 'ico sm')}</button>` : ''}</span>`)}</div>` : ''}
-        ${canEdit ? html`<input id="f-files" type="file" multiple accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"><span class="hint">PDF ou fotografia, até 20 MB cada.</span>` : quote?.files.length ? '' : html`<span class="hint">Sem documento anexado.</span>`}
-      </div>
-    </form>
-    <div class="modal-f">
-      ${quote && canEdit ? html`<button class="btn btn-danger left" type="button" id="qDelete">${icon('trash', 'ico sm')}Apagar</button>` : ''}
-      <button class="btn btn-ghost" type="button" data-close>${canEdit ? 'Cancelar' : 'Fechar'}</button>
-      ${canEdit ? html`<button class="btn btn-primary" type="button" id="qSave">${icon('check', 'ico sm')}${quote ? 'Guardar' : 'Registar orçamento'}</button>` : ''}
-    </div>`, { submit: canEdit ? () => save() : null });
-  if (!canEdit) return;
-  wireHouseField(m);
-  // Os documentos marcados só são apagados ao guardar.
-  m.querySelector('#qFiles')?.addEventListener('click', e => {
-    const b = e.target.closest('[data-remove]');
-    if (!b) return;
-    const fid = Number(b.dataset.remove);
-    const chip = m.querySelector(`[data-file="${fid}"] .file`);
-    if (remove.has(fid)) { remove.delete(fid); chip.style.textDecoration = ''; chip.style.opacity = ''; }
-    else { remove.add(fid); chip.style.textDecoration = 'line-through'; chip.style.opacity = '.5'; }
-  });
-  const btn = m.querySelector('#qSave');
-  async function save() {
-    try {
-      const d = readForm(m.querySelector('#quoteForm'));
-      if (!d.house_id) throw new Error('Escolha a casa.');
-      if (!d.supplier) throw new Error('Escreva o nome do fornecedor.');
-      if (!d.description) throw new Error('Escreva o que foi orçamentado.');
-      const amount = parseNum(d.amount);
-      if (Number.isNaN(amount)) throw new Error(`Valor inválido: "${d.amount}".`);
-      const files = [...(m.querySelector('#f-files')?.files || [])];
-      await busy(btn, async () => {
-        const body = { house_id: await resolveHouse(d, s), supplier: d.supplier, description: d.description, amount, quote_date: d.quote_date, status: d.status, notes: d.notes };
-        const qid = quote ? quote.id : (await api('/quotes', { method: 'POST', body })).id;
-        if (quote) await api(`/quotes/${quote.id}`, { method: 'PUT', body });
-        for (const fid of remove) await api(`/files/${fid}`, { method: 'DELETE' });
-        await uploadFiles(qid, files, (n, total) => { btn.textContent = total > 1 ? `A enviar ${n} de ${total}…` : 'A enviar o documento…'; });
-        closeModal();
-        toast(quote ? 'Orçamento guardado.' : 'Orçamento registado.');
-        after({ quoteId: qid });
-      });
-    } catch (e) { showFormError(e.message); }
-  }
-  btn.addEventListener('click', save);
-  m.querySelector('#qDelete')?.addEventListener('click', async () => {
-    if (!await confirmDialog({ title: 'Apagar orçamento', text: `O orçamento de ${quote.supplier} para ${quote.house_name} e os documentos anexados são apagados definitivamente.` })) return;
-    try { await api(`/quotes/${quote.id}`, { method: 'DELETE' }); toast('Orçamento apagado.'); after({}); } catch (e) { toast(e.message, true); }
-  });
 }
 
 /* ---------- casas ---------- */

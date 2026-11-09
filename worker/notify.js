@@ -145,3 +145,64 @@ export async function monthlyReportNotice(db, env, summary, now = new Date()) {
   }
   return { sent };
 }
+
+/* ---------- orçamentos ---------- */
+
+const QUOTE = `SELECT q.*, h.name AS house_name, COALESCE(s.name, q.supplier) AS supplier_name FROM quotes q
+  JOIN houses h ON h.id = q.house_id LEFT JOIN suppliers s ON s.id = q.supplier_id`;
+const eur = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(n);
+const quoteLink = q => ({ url: `/#orcamento-${q.id}`, tag: `orcamento-${q.id}` });
+
+async function admins(db) {
+  return (await db.all(`SELECT id FROM users WHERE role = 'admin' AND active = 1`)).map(u => u.id);
+}
+
+async function activeCreator(db, q) {
+  return q.created_by && await db.first('SELECT id FROM users WHERE id = ? AND active = 1', q.created_by) ? [q.created_by] : [];
+}
+
+// Avisos do pipeline: por decidir e feito (à administração, para aprovar ou pagar); aprovado e recusado (a quem o registou).
+export async function noticeQuote(db, env, quoteId, actor, stage) {
+  const q = await db.first(QUOTE + ' WHERE q.id = ?', quoteId);
+  if (!q) return;
+  const body = [q.house_name, q.supplier_name, q.amount != null ? eur(q.amount) : null].filter(Boolean).join(' · ');
+  const msg = {
+    por_decidir: [await admins(db), `Orçamento por decidir: ${clip(q.description, 60)}`],
+    feito: [await admins(db), `Trabalho feito, falta pagar: ${clip(q.description, 50)}`],
+    aprovado: [await activeCreator(db, q), `Orçamento aprovado: ${clip(q.description, 60)}`],
+    recusado: [await activeCreator(db, q), `Orçamento recusado: ${clip(q.description, 60)}`],
+  }[stage];
+  if (!msg) return;
+  const [to, title] = msg;
+  for (const uid of to.filter(u => u !== actor.id)) {
+    const r = await notifyUser(db, env, uid, { title, body, ...quoteLink(q) });
+    await db.run('INSERT INTO notify_log (kind, task_id, user_id, sent, failed) VALUES (?, ?, ?, ?, ?)', `orc_${stage}`, q.id, uid, r.sent, r.failed);
+  }
+}
+
+// Pedidos de orçamento sem resposta há 7 dias: um lembrete (uma só vez) a quem fez o pedido ou, se já não estiver, à administração.
+export const PEDIDO_DAYS = 7;
+
+export async function pedidoReminders(db, env, now = new Date()) {
+  if (hourLisbon(now) < REMINDER_HOUR) return { skipped: 'antes das 8h' };
+  const limit = new Date(now.getTime() - PEDIDO_DAYS * 864e5).toISOString();
+  const list = await db.all(`${QUOTE} WHERE q.status = 'pedido' AND q.stage_at <= ?
+    AND NOT EXISTS (SELECT 1 FROM notify_log n WHERE n.kind = 'orc_pedido7' AND n.task_id = q.id)`, limit);
+  let sent = 0;
+  for (const q of list) {
+    const to = (await activeCreator(db, q)).length ? await activeCreator(db, q) : await admins(db);
+    for (const uid of to) {
+      // Reserva o lembrete antes de enviar, para não se repetir.
+      const claim = await db.run(`INSERT OR IGNORE INTO notify_log (kind, task_id, user_id, day) VALUES ('orc_pedido7', ?, ?, 'unico')`, q.id, uid);
+      if (!claim.meta.changes) continue;
+      const days = Math.floor((now - new Date(q.stage_at)) / 864e5);
+      const r = await notifyUser(db, env, uid, {
+        title: `Pedido sem resposta há ${days} dias: ${clip(q.description, 50)}`,
+        body: [q.supplier_name, q.house_name].filter(Boolean).join(' · '),
+        ...quoteLink(q),
+      });
+      sent += r.sent;
+    }
+  }
+  return { quotes: list.length, sent };
+}
